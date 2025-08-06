@@ -685,39 +685,78 @@ class Circuit:
             return Circuit(graph)
 
         for source in dc_sources:
-
             if isinstance(source, VoltageSource):
-                node_names = (source.pos_node, source.neg_node)
-                rename_to = next((node for node in node_names if node == '0'),
-                                 min(node_names))
-                rename_from = next((node for node in node_names
-                                    if node != rename_to), None)
+                pos_node = source.pos_node
+                neg_node = source.neg_node
+                
+                # Skip if source is already shorted
+                if pos_node == neg_node:
+                    if graph.has_edge(pos_node, neg_node, source.name):
+                        graph.remove_edge(pos_node, neg_node, source.name)
+                    continue
+                
+                # Determine which node to keep (prefer ground node '0')
+                if neg_node == '0':
+                    keep_node, merge_node = neg_node, pos_node
+                elif pos_node == '0':
+                    keep_node, merge_node = pos_node, neg_node
+                else:
+                    # If neither is ground, keep the lexicographically smaller one
+                    keep_node, merge_node = (pos_node, neg_node) if pos_node < neg_node else (neg_node, pos_node)
+                
+                # Add alias tracking
+                graph.nodes[keep_node]['alias'].add(merge_node)
+                
+                # Remove the DC voltage source edge first
+                if graph.has_edge(pos_node, neg_node, source.name):
+                    graph.remove_edge(pos_node, neg_node, source.name)
+                
+                # Collect all edges connected to the merge_node
+                edges_to_relocate = []
+                if merge_node in graph:
+                    for neighbor in list(graph.neighbors(merge_node)):
+                        for edge_key in list(graph[merge_node][neighbor].keys()):
+                            edge_data = graph[merge_node][neighbor][edge_key]
+                            edges_to_relocate.append((merge_node, neighbor, edge_key, edge_data))
+                
+                # Update component references and relocate edges
+                for old_src, old_dst, edge_key, edge_data in edges_to_relocate:
+                    component = edge_data['component']
+                    
+                    # Update component node references
+                    if component.pos_node == merge_node:
+                        component.pos_node = keep_node
+                    if component.neg_node == merge_node:
+                        component.neg_node = keep_node
+                    
+                    # Remove old edge
+                    graph.remove_edge(old_src, old_dst, edge_key)
+                    
+                    # Skip self-loops (components with both terminals on same node after merge)
+                    if component.pos_node == component.neg_node:
+                        print(f"Warning: Component {component.name} became a self-loop and was removed")
+                        continue
+                    
+                    # Add edge with updated nodes
+                    new_src = keep_node if old_src == merge_node else old_src
+                    new_dst = keep_node if old_dst == merge_node else old_dst
+                    graph.add_edge(new_src, new_dst, key=edge_key, component=component)
+                
+                # Remove the merged node if it still exists and has no connections
+                if merge_node in graph and graph.degree(merge_node) == 0:
+                    graph.remove_node(merge_node)
+            
+            elif isinstance(source, CurrentSource):
+                # DC current sources become open circuits in small signal analysis
+                if graph.has_edge(source.pos_node, source.neg_node, source.name):
+                    graph.remove_edge(source.pos_node, source.neg_node, source.name)
+                    print(f"Removed DC current source {source.name}")
 
-                if not rename_from:
-                    raise ValueError(f'Invalid circuit: source {source.name}' 
-                                     'is shorted.')
-
-                graph.nodes[rename_to]['alias'].add(rename_from)
-
-                graph.remove_edge(source.pos_node,
-                                  source.neg_node,
-                                  source.name)
-
-                for nbr, nbrdict in graph.adj[rename_from].items():
-                    for edge in nbrdict.items():
-                        # node_from, node_to, edge_key, component
-                        # print(relabel_from, nbr, edge[0], edge[1]['instance'])
-                        instance = edge[1]['component']
-
-                        if instance.pos_node == rename_from:
-                            instance.pos_node = rename_to
-
-                        if instance.neg_node == rename_from:
-                            instance.neg_node = rename_to
-
-                # Relabel node relabel_from as relabel_to
-                nx.relabel_nodes(graph, {rename_from: rename_to},
-                                 copy=False)
+        # Clean up any isolated nodes that may have been created
+        isolated_nodes = [node for node in list(graph.nodes()) if graph.degree(node) == 0]
+        graph.remove_nodes_from(isolated_nodes)
+        if isolated_nodes:
+            print(f"Removed isolated nodes: {isolated_nodes}")
 
         return Circuit(graph)
 
