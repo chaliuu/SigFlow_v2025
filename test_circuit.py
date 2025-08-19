@@ -1,6 +1,6 @@
 import unittest
 import os
-from circuit import Circuit
+from circuit_parser import Circuit
 
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(__file__), 'test_data')
