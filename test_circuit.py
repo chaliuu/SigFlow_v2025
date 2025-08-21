@@ -13,7 +13,7 @@ def iter_netlist(path):
 
 class TestCircuit(unittest.TestCase):
     def test_2N3904_common_emitter(self):
-        netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_common_emitter.net')
+        netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_common_emitter.cir')
         with open(netlist_path, 'r') as f:
             netlist = f.read()
 
@@ -21,7 +21,7 @@ class TestCircuit(unittest.TestCase):
         with open(op_log_path, 'r') as f:
             op_log = f.read()
 
-        small_signal_netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_common_emitter_small_signal.net')
+        small_signal_netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_common_emitter_small_signal.cir')
         expected_netlist = sorted(iter_netlist(small_signal_netlist_path))
 
         circuit = Circuit.from_ltspice(netlist, op_log)
@@ -30,7 +30,7 @@ class TestCircuit(unittest.TestCase):
         self.assertEqual(expected_netlist, actual_netlist)
 
     def test_2N3904_cascode(self):
-        netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_cascode.net')
+        netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_cascode.cir')
         with open(netlist_path, 'r') as f:
             netlist = f.read()
 
@@ -38,7 +38,7 @@ class TestCircuit(unittest.TestCase):
         with open(op_log_path, 'r') as f:
             op_log = f.read()
 
-        small_signal_netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_cascode_small_signal.net')
+        small_signal_netlist_path = os.path.join(TEST_DATA_DIR, '2N3904_cascode_small_signal.cir')
         expected_netlist = sorted(iter_netlist(small_signal_netlist_path))
 
         circuit = Circuit.from_ltspice(netlist, op_log)
