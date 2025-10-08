@@ -685,50 +685,71 @@ class Circuit:
             return Circuit(graph)
 
         for source in dc_sources:
+            print("#################################################### SOURCES: ",source)
             if isinstance(source, VoltageSource):
+                print("#################################################### isInstance", source)
                 pos_node = source.pos_node
                 neg_node = source.neg_node
-                
+                print("#################################################### pos_node, neg_node", pos_node, neg_node)
                 # Skip if source is already shorted
                 if pos_node == neg_node:
                     if graph.has_edge(pos_node, neg_node, source.name):
+                        print(f"############Warning: Voltage source {source.name} is already shorted")
                         graph.remove_edge(pos_node, neg_node, source.name)
                     continue
                 
                 # Determine which node to keep (prefer ground node '0')
                 if neg_node == '0':
+                    print("#################################################### neg_node is 0")
                     keep_node, merge_node = neg_node, pos_node
                 elif pos_node == '0':
+                    print("#################################################### pos_node is 0")
                     keep_node, merge_node = pos_node, neg_node
                 else:
                     # If neither is ground, keep the lexicographically smaller one
+                    print("#################################################### neither is 0")
                     keep_node, merge_node = (pos_node, neg_node) if pos_node < neg_node else (neg_node, pos_node)
                 
                 # Add alias tracking
                 graph.nodes[keep_node]['alias'].add(merge_node)
                 
-                # Remove the DC voltage source edge first
+                # Remove the DC voltage source edge FIRST before collecting other edges
                 if graph.has_edge(pos_node, neg_node, source.name):
+                    print("#################################################### Removing DC voltage source edge:", pos_node, neg_node, source.name)
                     graph.remove_edge(pos_node, neg_node, source.name)
                 
-                # Collect all edges connected to the merge_node
-                edges_to_relocate = []
-                if merge_node in graph:
-                    for neighbor in list(graph.neighbors(merge_node)):
-                        for edge_key in list(graph[merge_node][neighbor].keys()):
-                            edge_data = graph[merge_node][neighbor][edge_key]
-                            edges_to_relocate.append((merge_node, neighbor, edge_key, edge_data))
-                
-                # Update component references and relocate edges
-                for old_src, old_dst, edge_key, edge_data in edges_to_relocate:
+                # Update ALL components in the graph that reference the merge_node
+                # This includes control nodes in VCCS/VCVS that may not have edges connected to merge_node
+                for u, v, edge_key, edge_data in list(graph.edges(keys=True, data=True)):
                     component = edge_data['component']
                     
-                    # Update component node references
+                    # Update component terminal node references
                     if component.pos_node == merge_node:
                         component.pos_node = keep_node
                     if component.neg_node == merge_node:
                         component.neg_node = keep_node
                     
+                    # Update control node references for VCCS and VCVS
+                    if isinstance(component, (VoltageDependentCurrentSource, VoltageDependentVoltageSource)):
+                        if component.pos_input_node == merge_node:
+                            component.pos_input_node = keep_node
+                        if component.neg_input_node == merge_node:
+                            component.neg_input_node = keep_node
+                
+                # Collect all edges connected to the merge_node that need to be relocated
+                edges_to_relocate = []
+                if merge_node in graph:
+                    for neighbor in list(graph.neighbors(merge_node)):
+                        for edge_key in list(graph[merge_node][neighbor].keys()):
+                            # Skip the voltage source edge if it somehow still exists
+                            if edge_key == source.name:
+                                continue
+                            edge_data = graph[merge_node][neighbor][edge_key]
+                            component = edge_data['component']
+                            edges_to_relocate.append((merge_node, neighbor, edge_key, component))
+                
+                # Relocate edges from merge_node to keep_node
+                for old_src, old_dst, edge_key, component in edges_to_relocate:
                     # Remove old edge
                     graph.remove_edge(old_src, old_dst, edge_key)
                     
@@ -757,6 +778,13 @@ class Circuit:
         graph.remove_nodes_from(isolated_nodes)
         if isolated_nodes:
             print(f"Removed isolated nodes: {isolated_nodes}")
+
+        # Print the entire graph for debugging
+        print("################# Final graph nodes and edges:")
+        for node in graph.nodes(data=True):
+            print(f"Node: {node}")
+        for u, v, key, data in graph.edges(keys=True, data=True):
+            print(f"Edge: {u} -- {v} [{key}]: {data}")
 
         return Circuit(graph)
 
