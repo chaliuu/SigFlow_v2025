@@ -455,23 +455,25 @@ def DPI_algorithm( circuit : cir.Circuit ):
                                     gain: Union[str, float]):
 """ 
             
-                        # pass A
+                        # pass A - only create edge if pos_input_node is not ground
                         cur_target = "Isc" + n[1:].lower() if n.startswith("V") else "Isc" + n.lower() 
                         pos_input_node = circuit.multigraph.edges[n,ne,k]['component'].pos_input_node
                         neg_input_node = circuit.multigraph.edges[n,ne,k]['component'].neg_input_node
-                        cur_source_1 = "V" + pos_input_node.lower() if not pos_input_node.startswith("V") else pos_input_node
-                        if sfg.graph.has_edge(cur_source_1, cur_target):
-                            sfg.graph.edges[cur_source_1, cur_target]['weight'] += (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].neg_node else " + ") +  str(circuit.multigraph.edges[n,ne,k]['component'].name)
-                        else:
-                            sfg.graph.add_edge( cur_source_1, cur_target , weight = (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].neg_node else " + ")  + str(circuit.multigraph.edges[n,ne,k]['component'].name))
+                        
+                        if pos_input_node != "0" and pos_input_node.lower() != "vcc":
+                            cur_source_1 = "V" + pos_input_node.lower() if not pos_input_node.startswith("V") else pos_input_node
+                            if sfg.graph.has_edge(cur_source_1, cur_target):
+                                sfg.graph.edges[cur_source_1, cur_target]['weight'] += (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].neg_node else " + ") +  str(circuit.multigraph.edges[n,ne,k]['component'].name)
+                            else:
+                                sfg.graph.add_edge( cur_source_1, cur_target , weight = (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].neg_node else " + ")  + str(circuit.multigraph.edges[n,ne,k]['component'].name))
 
-                        # try adding edge from neg_input node to cur_target -> swapping positive node and negative to get the second pass
-                        # pass B   
-                        cur_source_2 =    "V" + neg_input_node.lower() if not neg_input_node.startswith("V") else neg_input_node
-                        if sfg.graph.has_edge(cur_source_2, cur_target):
-                            sfg.graph.edges[cur_source_2, cur_target]['weight'] += (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ") +  str(circuit.multigraph.edges[n,ne,k]['component'].name)
-                        else:
-                            sfg.graph.add_edge( cur_source_2, cur_target , weight = (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ")  + str(circuit.multigraph.edges[n,ne,k]['component'].name))
+                        # pass B - only create edge if neg_input_node is not ground
+                        if neg_input_node != "0" and neg_input_node.lower() != "vcc":
+                            cur_source_2 = "V" + neg_input_node.lower() if not neg_input_node.startswith("V") else neg_input_node
+                            if sfg.graph.has_edge(cur_source_2, cur_target):
+                                sfg.graph.edges[cur_source_2, cur_target]['weight'] += (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ") +  str(circuit.multigraph.edges[n,ne,k]['component'].name)
+                            else:
+                                sfg.graph.add_edge( cur_source_2, cur_target , weight = (" - " if n == circuit.multigraph.edges[n,ne,k]['component'].pos_node else " + ")  + str(circuit.multigraph.edges[n,ne,k]['component'].name))
 
                         
                     elif isinstance(circuit.multigraph.edges[n,ne,k]['component'] , cir.VoltageDependentVoltageSource):
