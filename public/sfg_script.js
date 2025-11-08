@@ -4,6 +4,110 @@ const circuitId = sessionStorage.getItem('circuitId');
 
 let [simplify_mode, node1, node2] = [false, null, null];
 let [highlight_mode, hlt_src, hlt_tgt] = [false, null, null];
+const SYMBOLIC_LABEL_BASE_FONT = 24;
+const EDGE_BASE_CURVE_DISTANCE = 220;
+const EDGE_CURVE_SPACING = 150;
+const EDGE_MIN_CURVE_MAGNITUDE = 130;
+const EDGE_WEIGHT_SHIFT = 0.22;
+const EDGE_CURVE_LENGTH_BASE = 260;
+const EDGE_CURVE_LENGTH_SCALE = 280;
+const EDGE_CENTER_EXPANSION = 340;
+const EDGE_LABEL_OFFSET_BASE = -18;
+const EDGE_LABEL_OFFSET_STEP = 26;
+const EDGE_LABEL_WIDTH_PADDING = 72;
+const EDGE_LABEL_CHAR_FACTOR = 0.62;
+const EDGE_LABEL_WIDTH_SCALE = 0.45;
+
+let pendingCurveUpdate = false;
+
+function scheduleEdgeCurveUpdate(cy) {
+    if (!cy || cy.destroyed()) {
+        return;
+    }
+
+    if (pendingCurveUpdate) {
+        return;
+    }
+
+    pendingCurveUpdate = true;
+
+    requestAnimationFrame(() => {
+        pendingCurveUpdate = false;
+        applyEdgeCurves(cy);
+        syncSymbolicLabelOffsets(cy);
+    });
+}
+
+function sanitizeLatexText(text) {
+    if (!text) {
+        return '';
+    }
+
+    return String(text)
+        .replace(/\\frac/g, 'frac')
+        .replace(/\\[a-zA-Z]+/g, 'A')
+        .replace(/[{}^_]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function approximateLabelWidth(text, fontSize) {
+    if (!text) {
+        return 0;
+    }
+
+    const normalized = text.trim();
+
+    if (!normalized) {
+        return 0;
+    }
+
+    const baseSize = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : SYMBOLIC_LABEL_BASE_FONT;
+    const length = normalized.length;
+
+    return length * baseSize * EDGE_LABEL_CHAR_FACTOR + EDGE_LABEL_WIDTH_PADDING;
+}
+
+function measureEdgeLabelWidth(edge) {
+    if (!edge || edge.destroyed()) {
+        return 0;
+    }
+
+    const measuredWidth = edge.scratch('_labelWidthPx');
+
+    if (measuredWidth && measuredWidth > 0) {
+        return measuredWidth + EDGE_LABEL_WIDTH_PADDING * 0.5;
+    }
+
+    const numericText = edge.data('weight') || '';
+    const numericFont = parseFloat(edge.style ? edge.style('font-size') : SYMBOLIC_LABEL_BASE_FONT) || SYMBOLIC_LABEL_BASE_FONT;
+    const numericWidth = approximateLabelWidth(String(numericText), numericFont);
+
+    const symbolicIndex = edge.data('symbolicIndex');
+    let symbolicText = '';
+
+    if (symbolicIndex !== undefined && symbolicIndex !== null && edge_symbolic_label && edge_symbolic_label[symbolicIndex]) {
+        symbolicText = sanitizeLatexText(edge_symbolic_label[symbolicIndex]);
+    }
+
+    const symbolicWidth = approximateLabelWidth(symbolicText, SYMBOLIC_LABEL_BASE_FONT * 1.05);
+
+    return Math.max(numericWidth, symbolicWidth);
+}
+
+function syncSymbolicLabelOffsets(cy) {
+    if (!symbolic_flag || !cy || cy.destroyed()) {
+        return;
+    }
+
+    cy.edges().forEach(edge => {
+        const labelEl = document.getElementById(`edge-label-${edge.id()}`);
+
+        if (labelEl) {
+            labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
+        }
+    });
+}
 
 let stack_len = 0
 let redo_len = 0
@@ -12,7 +116,7 @@ if (!circuitId) {
     window.location.replace('./landing.html');
 }
 
-var symbolic_flag = false //feature toggle
+var symbolic_flag = true //feature toggle
 var tf_flag = false //transfer function toggle
 var lg_flag = false //loop gain toggle
 var tf = {}
@@ -54,13 +158,16 @@ function edge_helper(sample_data, flag) {
         edge_symbolic_label[i] = new_edge.data.weight.symbolic
         // TODO MARK
         // call sfg_patch_request (with or without rerendering) to send to backend
-        
+
         // Represent magnitude with 2 decimal points exponent
         let magnitude = expo((new_edge.data.weight.magnitude), 2).toString()
         let phase = new_edge.data.weight.phase.toFixed(2).toString()
         // Transmittance in polar form
         let result = magnitude.concat("∠", phase);
         new_edge.data.weight = result
+        new_edge.data.controlPointDistance = -EDGE_BASE_CURVE_DISTANCE
+        new_edge.data.controlPointWeight = 0.5
+        new_edge.data.labelOffset = EDGE_LABEL_OFFSET_BASE
         sfg_edges.push(new_edge)
     }
 
@@ -78,18 +185,36 @@ function make_sfg(elements) {
         layout: {
             name: 'dagre',
             nodeSep: 200,
-            edgeSep: 200,
-            rankSep: 100,
+            edgeSep: 220,
+            rankSep: 120,
             rankDir: 'LR',
             fit: true,
-            minLen: function( edge ){ return 2 } 
+            minLen: function( edge ){ return 2 }
         },
         wheelSensitivity: 0.4,
         style: [
         {
             selector: 'node[name]',
             style: {
-            'content': 'data(name)'
+            'content': 'data(name)',
+            'font-size': '26px',
+            'text-outline-width': '8',
+            'text-outline-color': '#E8E8E8',
+            'width': '84px',
+            'height': '84px',
+            'background-color': '#5aa5ff',
+            'border-width': '4px',
+            'border-color': '#4a90e2',
+            'background-fill': 'radial-gradient',
+            'background-gradient-stop-colors': '#ffffff #5aa5ff',
+            'background-gradient-stop-positions': '0% 100%',
+            'shadow-blur': 18,
+            'shadow-color': '#2d5aa0',
+            'shadow-opacity': 0.25,
+            'shadow-offset-x': 0,
+            'shadow-offset-y': 4,
+            'text-valign': 'center',
+            'text-halign': 'center'
             }
         },
 
@@ -104,11 +229,21 @@ function make_sfg(elements) {
             selector: 'edge',
             style: {
             'curve-style': 'unbundled-bezier',
-            'control-point-distance': '-40',
+            'control-point-distance': 'data(controlPointDistance)',
+            'control-point-weight': 'data(controlPointWeight)',
+            'control-point-step-size': EDGE_CURVE_SPACING,
+            'width': 5,
+            'line-color': '#4a90e2',
             //'curve-style': 'bezier',
             'target-arrow-shape': 'triangle',
+            'arrow-scale': 1.2,
+            'target-arrow-color': '#4a90e2',
+            'source-arrow-color': '#4a90e2',
             'content': 'data(weight)',
-            'text-outline-width': '4',
+            'font-size': '24px',
+            'edge-text-rotation': 'autorotate',
+            'text-margin-y': 'data(labelOffset)',
+            'text-outline-width': '8',
             'text-outline-color': '#E8E8E8'
             }
         },
@@ -237,13 +372,7 @@ function make_sfg(elements) {
         elements: elements
     });
 
-    //make lines straight
-    cy.edges().forEach((edge,idx) => {
-        if((edge.sourceEndpoint().x === edge.targetEndpoint().x) || (edge.sourceEndpoint().y === edge.targetEndpoint().y) && edge.source().edgesWith(edge.target()).length === 1) {
-            edge.css({'control-point-distance': '0'})
-        }
-
-    });
+    setupEdgeCurveCurvature(cy);
 
     // log all nodes and edges of sfg
     console.log("nodes:", cy.nodes());
@@ -303,11 +432,273 @@ function make_sfg(elements) {
 
     // Initialize edge hover functionality
     initializeEdgeHover();
-    
+
     const time2 = new Date();
     let time_elapse = (time2 - time1)/1000;
     console.log("elements:", elements);
     console.log("make_sfg SFG loading time: " + time_elapse + " seconds");
+}
+
+
+function setupEdgeCurveCurvature(cy) {
+    if (!cy || cy.destroyed()) {
+        return;
+    }
+
+    const scheduleUpdate = () => scheduleEdgeCurveUpdate(cy);
+
+    scheduleUpdate();
+    cy.on('layoutstop', scheduleUpdate);
+    cy.on('add remove', 'edge', scheduleUpdate);
+    cy.on('position', 'node', scheduleUpdate);
+}
+
+
+function applyEdgeCurves(cy) {
+    if (!cy || cy.destroyed()) {
+        return;
+    }
+
+    cy.edges().forEach((edge, idx) => {
+        if (!edge || !edge.isEdge() || edge.destroyed()) {
+            return;
+        }
+
+        edge.data('symbolicIndex', idx);
+
+        if (edge.data('labelOffset') === undefined || edge.data('labelOffset') === null) {
+            edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
+        }
+    });
+
+    const groupedOutgoing = new Map();
+    const groupedIncoming = new Map();
+    const pairedEdges = new Map();
+
+    cy.edges().forEach(edge => {
+        if (!edge.isEdge() || edge.destroyed()) {
+            return;
+        }
+
+        const sourceEndpoint = edge.sourceEndpoint();
+        const targetEndpoint = edge.targetEndpoint();
+
+        if (!sourceEndpoint || !targetEndpoint) {
+            return;
+        }
+
+        const isVertical = Math.abs(sourceEndpoint.x - targetEndpoint.x) < 1;
+        const isHorizontal = Math.abs(sourceEndpoint.y - targetEndpoint.y) < 1;
+        const isSingleConnection = edge.source().edgesWith(edge.target()).length === 1;
+
+        if ((isVertical || isHorizontal) && isSingleConnection) {
+            edge.scratch('_forceStraight', true);
+            edge.data('controlPointDistance', 0);
+            edge.data('controlPointWeight', 0.5);
+            return;
+        }
+
+        edge.removeScratch('_forceStraight');
+
+        const outKey = edge.source().id();
+        const inKey = edge.target().id();
+
+        if (!groupedOutgoing.has(outKey)) {
+            groupedOutgoing.set(outKey, []);
+        }
+        if (!groupedIncoming.has(inKey)) {
+            groupedIncoming.set(inKey, []);
+        }
+
+        groupedOutgoing.get(outKey).push(edge);
+        groupedIncoming.get(inKey).push(edge);
+
+        const pairKey = `${edge.source().id()}->${edge.target().id()}`;
+
+        if (!pairedEdges.has(pairKey)) {
+            pairedEdges.set(pairKey, []);
+        }
+
+        pairedEdges.get(pairKey).push(edge);
+    });
+
+    const assignRank = (collection, accessor, rankKey, sizeKey) => {
+        if (!collection || collection.length === 0) {
+            return;
+        }
+
+        collection.forEach(edge => edge.scratch(sizeKey, collection.length));
+
+        if (collection.length === 1) {
+            collection[0].scratch(rankKey, 0);
+            return;
+        }
+
+        collection
+            .sort((a, b) => accessor(a) - accessor(b))
+            .forEach((edge, idx) => {
+                const offset = idx - (collection.length - 1) / 2;
+                edge.scratch(rankKey, offset);
+            });
+    };
+
+    groupedOutgoing.forEach(edges => {
+        assignRank(edges, edge => edge.target().position('y'), '_outRank', '_outSize');
+    });
+
+    groupedIncoming.forEach(edges => {
+        assignRank(edges, edge => edge.source().position('y'), '_inRank', '_inSize');
+    });
+
+    pairedEdges.forEach(edges => {
+        edges
+            .sort((a, b) => {
+                const targetDiff = a.target().position('y') - b.target().position('y');
+
+                if (targetDiff !== 0) {
+                    return targetDiff;
+                }
+
+                const sourceDiff = a.source().position('y') - b.source().position('y');
+
+                if (sourceDiff !== 0) {
+                    return sourceDiff;
+                }
+
+                return a.id().localeCompare(b.id());
+            })
+            .forEach((edge, idx) => {
+                edge.scratch('_pairIndex', idx);
+                edge.scratch('_pairSize', edges.length);
+            });
+    });
+
+    const positions = cy.nodes().map(node => node.position());
+    const center = positions.reduce((acc, pos) => {
+        acc.x += pos.x;
+        acc.y += pos.y;
+        return acc;
+    }, { x: 0, y: 0 });
+
+    if (positions.length) {
+        center.x /= positions.length;
+        center.y /= positions.length;
+    }
+
+    const bbox = cy.elements().boundingBox();
+    const maxRadius = Math.max(bbox.w, bbox.h) / 2;
+    const safeRadius = Math.max(maxRadius, 1);
+
+    cy.edges().forEach(edge => {
+        if (!edge.isEdge() || edge.destroyed()) {
+            return;
+        }
+
+        const forceStraight = edge.scratch('_forceStraight');
+        const outRank = edge.scratch('_outRank') || 0;
+        const inRank = edge.scratch('_inRank') || 0;
+        const outSize = edge.scratch('_outSize') || 1;
+        const inSize = edge.scratch('_inSize') || 1;
+        const pairIndex = edge.scratch('_pairIndex') || 0;
+        const pairSize = edge.scratch('_pairSize') || 1;
+
+        const cleanupScratch = () => {
+            edge.removeScratch('_outRank');
+            edge.removeScratch('_inRank');
+            edge.removeScratch('_outSize');
+            edge.removeScratch('_inSize');
+            edge.removeScratch('_pairIndex');
+            edge.removeScratch('_pairSize');
+        };
+
+        const sourcePos = edge.source().position();
+        const targetPos = edge.target().position();
+        const dx = targetPos.x - sourcePos.x;
+        const dy = targetPos.y - sourcePos.y;
+        const spanLength = Math.hypot(dx, dy);
+        const midX = (sourcePos.x + targetPos.x) / 2;
+        const midY = (sourcePos.y + targetPos.y) / 2;
+        const toCenterX = midX - center.x;
+        const toCenterY = midY - center.y;
+        const centerDistance = Math.hypot(toCenterX, toCenterY);
+        const norm = spanLength === 0 ? 1 : spanLength;
+        const perpX = -dy / norm;
+        const perpY = dx / norm;
+        const outward = perpX * toCenterX + perpY * toCenterY;
+        const combinedOffset = outRank - inRank;
+        let directionSign = outward >= 0 ? 1 : -1;
+
+        if (Math.abs(outward) < 0.01) {
+            if (combinedOffset !== 0) {
+                directionSign = combinedOffset > 0 ? 1 : -1;
+            } else if (dy !== 0) {
+                directionSign = dy > 0 ? 1 : -1;
+            }
+        }
+
+        const outSpread = outSize > 1 ? outRank / ((outSize - 1) / 2) : 0;
+        const inSpread = inSize > 1 ? inRank / ((inSize - 1) / 2) : 0;
+        const spreadMagnitude = Math.abs(outRank) + Math.abs(inRank);
+        const pairSpread = pairSize > 1 ? pairIndex - (pairSize - 1) / 2 : 0;
+        const normalizedPairSpread = pairSize > 1 ? pairSpread / ((pairSize - 1) / 2) : 0;
+
+        const labelWidth = measureEdgeLabelWidth(edge);
+        const labelRatio = spanLength > 0 ? labelWidth / spanLength : 1;
+        const labelDirectionBias = directionSign * EDGE_LABEL_OFFSET_STEP * 0.55;
+        const labelCrowdingBias = combinedOffset * EDGE_LABEL_OFFSET_STEP * 0.35;
+        const pairLaneBias = normalizedPairSpread * EDGE_LABEL_OFFSET_STEP * 1.15;
+        const rawLabelOffset = EDGE_LABEL_OFFSET_BASE + labelDirectionBias + labelCrowdingBias + pairLaneBias;
+        const labelOffset = Math.max(-220, Math.min(220, rawLabelOffset));
+
+        edge.data('labelOffset', labelOffset);
+
+        if (forceStraight) {
+            cleanupScratch();
+            return;
+        }
+
+        let magnitude = EDGE_BASE_CURVE_DISTANCE;
+        magnitude += spreadMagnitude * (EDGE_CURVE_SPACING * 0.6);
+        magnitude += Math.abs(combinedOffset) * (EDGE_CURVE_SPACING * 0.4);
+        magnitude += Math.abs(pairSpread) * (EDGE_CURVE_SPACING * 1.1);
+        magnitude += labelWidth * EDGE_LABEL_WIDTH_SCALE;
+
+        if (labelRatio > 0.85) {
+            magnitude += (labelRatio - 0.85) * EDGE_CURVE_SPACING * 2.1;
+        }
+
+        if (spanLength > EDGE_CURVE_LENGTH_BASE) {
+            magnitude += ((spanLength - EDGE_CURVE_LENGTH_BASE) / EDGE_CURVE_LENGTH_SCALE) * EDGE_CURVE_SPACING;
+        }
+
+        if (spanLength < labelWidth * 0.9) {
+            magnitude += (labelWidth * 0.9 - spanLength) * 0.9;
+        }
+
+        if (centerDistance <= safeRadius) {
+            const centerRatio = 1 - Math.min(centerDistance / safeRadius, 1);
+            magnitude += centerRatio * EDGE_CENTER_EXPANSION;
+        }
+
+        magnitude = Math.max(EDGE_MIN_CURVE_MAGNITUDE, magnitude);
+
+        let distance = directionSign * magnitude;
+
+        if (distance === 0) {
+            distance = directionSign >= 0 ? EDGE_MIN_CURVE_MAGNITUDE : -EDGE_MIN_CURVE_MAGNITUDE;
+        }
+
+        const weightBase = (outSpread - inSpread) * EDGE_WEIGHT_SHIFT;
+        const pairBias = normalizedPairSpread * 0.18;
+        const outwardBias = directionSign * 0.08;
+        const labelBias = Math.max(-0.15, Math.min(0.15, (labelRatio - 1) * 0.12));
+        const weight = Math.max(0.12, Math.min(0.88, 0.5 + weightBase + outwardBias + pairBias + labelBias));
+
+        edge.data('controlPointDistance', distance);
+        edge.data('controlPointWeight', weight);
+
+        cleanupScratch();
+    });
 }
 
 
@@ -354,33 +745,57 @@ function renderOverlay(data, curr_elements) {
         layout: {
             name: 'dagre',
             nodeSep: 200,
-            edgeSep: 200,
-            rankSep: 100,
+            edgeSep: 220,
+            rankSep: 120,
             rankDir: 'LR'
         },
         style: [
             {
                 selector: 'node',
                 style: {
-                    'background-color': '#007bff',
+                    'background-color': '#5aa5ff',
+                    'width': '84px',
+                    'height': '84px',
+                    'border-width': '4px',
+                    'border-color': '#4a90e2',
+                    'background-fill': 'radial-gradient',
+                    'background-gradient-stop-colors': '#ffffff #5aa5ff',
+                    'background-gradient-stop-positions': '0% 100%',
+                    'shadow-blur': 18,
+                    'shadow-color': '#2d5aa0',
+                    'shadow-opacity': 0.25,
+                    'shadow-offset-x': 0,
+                    'shadow-offset-y': 4,
                     'label': 'data(name)',
-                    'font-size': '10px'
+                    'font-size': '26px',
+                    'text-outline-width': '8',
+                    'text-outline-color': '#E8E8E8',
+                    'text-valign': 'center',
+                    'text-halign': 'center'
                 }
             },
             {
                 selector: 'edge',
                 style: {
-                    'width': 2,
-                    'line-color': '#888',
+                    'width': 5,
+                    'line-color': '#4a90e2',
                     'target-arrow-shape': 'triangle',
-                    'arrow-scale': 1.5,
-                    'curve-style': 'bezier'
+                    'arrow-scale': 1.2,
+                    'target-arrow-color': '#4a90e2',
+                    'source-arrow-color': '#4a90e2',
+                    'curve-style': 'unbundled-bezier',
+                    'control-point-distance': 'data(controlPointDistance)',
+                    'control-point-weight': 'data(controlPointWeight)',
+                    'control-point-step-size': EDGE_CURVE_SPACING,
+                    'text-margin-y': 'data(labelOffset)'
                 }
             }
         ]
     });
 
     alignLayers(svgLayer, sfgLayer);
+
+    setupEdgeCurveCurvature(cy);
 
 
 }
@@ -1642,34 +2057,22 @@ function editBranch() {
 function  display_mag_sfg() {
     let cy = window.cy;
 
-    let updates = new Array(cy.edges().length)
-    let edges = new Array(cy.edges().length)
+    let updates = new Array(cy.edges().length);
+    let poppers = new Array(cy.edges().length);
 
-    cy.edges().forEach((edge,idx) => {
-        
-        // print each edge
-        // console.log('Edge:', edge);
-        // console.log('Edges[idx]: ', edges[idx]);
+    cy.edges().forEach((edge, idx) => {
+        const labelId = `edge-label-${edge.id()}`;
 
-        edges[idx] = edge.popper({
+        poppers[idx] = edge.popper({
             content: () => {
-            let div = document.createElement('div');
-
-            //div.classList.add('popper-div');
-            div.id = 'edge-' + idx;
-            div.style.cssText = `font-size:${cy.zoom()*16 + 'px'};font-weight:400;`
-            
-            div.classList.add('label')
-        
-            div.innerHTML = '$$' + edge_symbolic_label[idx] + '$$';
-            //div.innerHTML = '$$\\frac{y}{2x} + C$$';
-
-
-        
-            //document.getElementById('magnitudes').appendChild(div);
-            //document.body.appendChild(div);
-            document.getElementsByClassName('sfg-section')[0].appendChild(div);
-            return div;
+                let div = document.createElement('div');
+                div.id = labelId;
+                div.classList.add('label');
+                div.style.cssText = `font-size:${cy.zoom() * SYMBOLIC_LABEL_BASE_FONT + 'px'};font-weight:400;`;
+                div.style.marginTop = `${edge.data('labelOffset') || 0}px`;
+                div.innerHTML = '$$' + (edge_symbolic_label[idx] || '') + '$$';
+                document.getElementsByClassName('sfg-section')[0].appendChild(div);
+                return div;
             },
             popper: {
                 modifiers: {
@@ -1678,32 +2081,119 @@ function  display_mag_sfg() {
                         boundariesElement: document.getElementsByClassName('sfg-section')[0],
                         padding: 5
                     },
-                    hide:  {
+                    hide: {
                         enabled: true,
                     }
+                }
             }
-        }})
+        });
 
-        updates[idx] = () => {
-            edges[idx].update();
-            edge = document.querySelector(`#edge-${idx}`);
-            if (edge) {
-                edge.style.fontSize = cy.zoom()*16 + 'px';
+        const updateFn = () => {
+            poppers[idx].update();
+            const labelEl = document.getElementById(labelId);
+
+            if (labelEl) {
+                labelEl.style.fontSize = cy.zoom() * SYMBOLIC_LABEL_BASE_FONT + 'px';
+                labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
+
+                const rect = labelEl.getBoundingClientRect();
+
+                if (rect.width && rect.height) {
+                    edge.scratch('_labelWidthPx', rect.width);
+                    edge.scratch('_labelHeightPx', rect.height);
+                }
             }
-        }
-          
-        edge.connectedNodes().on('position', updates[idx]);
-        
-        cy.on('pan zoom resize', updates[idx]);
-    
+
+            scheduleEdgeCurveUpdate(cy);
+        };
+
+        updates[idx] = updateFn;
+
+        edge.connectedNodes().on('position', updateFn);
+        cy.on('pan zoom resize', updateFn);
     });
 
-    MathJax.typeset();
-    
+    scheduleEdgeCurveUpdate(cy);
+
+    const typesetPromise = MathJax.typesetPromise
+        ? MathJax.typesetPromise()
+        : new Promise(resolve => {
+            if (typeof MathJax.typeset === 'function') {
+                MathJax.typeset();
+            }
+            resolve();
+        });
+
+    typesetPromise.then(() => {
+        cy.edges().forEach(edge => {
+            const labelEl = document.getElementById(`edge-label-${edge.id()}`);
+
+            if (labelEl) {
+                const rect = labelEl.getBoundingClientRect();
+
+                if (rect.width && rect.height) {
+                    edge.scratch('_labelWidthPx', rect.width);
+                    edge.scratch('_labelHeightPx', rect.height);
+                }
+
+                labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
+            }
+        });
+
+        scheduleEdgeCurveUpdate(cy);
+    });
+
     cy.style().selector('edge').css({'content': ''}).update()
     const time2 = new Date()
     let time_elapse = (time2 - time1)/1000
     console.log("display_mag_sfg SFG loading time: " + time_elapse + " seconds")
+}
+
+function updateSymbolicModeUI() {
+    const frequencySlider = document.getElementById("frequency-slider");
+    if (frequencySlider) {
+        frequencySlider.disabled = symbolic_flag;
+    }
+
+    const removeBranchButton = document.getElementById("rmv-branch-btn");
+    if (removeBranchButton) {
+        removeBranchButton.disabled = !symbolic_flag;
+    }
+
+    const editBranchButton = document.getElementById("edit-branch-btn");
+    if (editBranchButton) {
+        editBranchButton.disabled = !symbolic_flag;
+    }
+
+    const symbolicToggle = document.getElementById("feature-toggle");
+    if (symbolicToggle) {
+        symbolicToggle.checked = symbolic_flag;
+    }
+
+    const toggleStartTime = new Date();
+
+    const symbolic_labels = document.querySelectorAll('.label');
+    symbolic_labels.forEach(label => {
+        label.remove();
+    });
+
+    if (window.cy) {
+        if (symbolic_flag) {
+            display_mag_sfg();
+        } else {
+            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
+            window.cy.edges().forEach(edge => {
+                edge.removeScratch('_labelWidthPx');
+                edge.removeScratch('_labelHeightPx');
+                edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
+            });
+            scheduleEdgeCurveUpdate(window.cy);
+        }
+    }
+
+    const toggleEndTime = new Date();
+    let time_elapse = (toggleEndTime - toggleStartTime)/1000;
+    console.log("SFG loading time (symbolic and magnitude toggle): " + time_elapse + " seconds");
 }
 
 // declare global array of keys
@@ -1930,6 +2420,7 @@ function render_frontend(data) {
     let curr_elements = edge_helper(data, symbolic_flag)
     // load SFG panel
     make_sfg(curr_elements)
+    updateSymbolicModeUI()
     // load parameter panel
     make_parameter_panel(data.parameters)
     // load schematic panel
@@ -1961,6 +2452,7 @@ function update_frontend(data) {
     let curr_elements = edge_helper(data, symbolic_flag)
     // load SFG panel
     make_sfg(curr_elements)
+    updateSymbolicModeUI()
     // load parameter panel
     make_parameter_panel(data.parameters)
 }
@@ -1971,48 +2463,10 @@ document.addEventListener('DOMContentLoaded', load_interface);
 
 async function sfg_toggle() {
     symbolic_flag = !symbolic_flag
-    //document.getElementById("frequency-slider").disabled = !document.getElementById("frequency-slider").disabled
     try {
-        // Disable frequency slider on symbolic
-        if (!symbolic_flag) {
-            document.getElementById("frequency-slider").disabled = false;
-            document.getElementById("rmv-branch-btn").disabled = true;
-            document.getElementById("edit-branch-btn").disabled = true;
-        }
-        else {
-            document.getElementById("frequency-slider").disabled = true;
-            document.getElementById("rmv-branch-btn").disabled = false;
-            document.getElementById("edit-branch-btn").disabled = false;
-        }
-
-        // let url = new URL(`${baseUrl}/circuits/${circuitId}`)
-        // const response = await fetch(url)
-        // let data = await response.json()
-
-        //remove existing magnitude labels
-
-        const time1 = new Date()
-    
-
-        const symbolic_labels = document.querySelectorAll('.label');
-        symbolic_labels.forEach(label => {
-            label.remove();
-        });
-
-        if(symbolic_flag) {
-            display_mag_sfg();
-        }
-        else {
-            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
-        }
-
-        const time2 = new Date()
-
-        let time_elapse = (time2 - time1)/1000
-        console.log("SFG loading time (symbolic and magnitude toggle): " + time_elapse + " seconds")
-        
-        
-    } catch {
+        updateSymbolicModeUI()
+    } catch (error) {
+        console.error(error)
         alert("error when toggle sfg")
     }
 }
