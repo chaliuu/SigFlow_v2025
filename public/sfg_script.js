@@ -352,7 +352,7 @@ function renderOverlay(data, curr_elements) {
       window.cy.mount(sfgLayer);
     } catch (e) {
       console.warn('cy.mount error:', e);
-    }
+                }
   } else {
     console.warn('window.cy is not ready when renderOverlay ran');
   }
@@ -4220,408 +4220,178 @@ function validateNode(nodeId) {
     return existingNodes.includes(nodeId); // Check if the node exists
 }
 
-
-
 /* ==========================================================
-   SFG↔SVG overlay: accurate markers + relocation + solid reset
-   (recomputes live SFG positions; ensures SVG has a viewBox)
+   Dynamic SFG → SVG placement (V* /Isc* naming convention)
+   Places nodes automatically once cy + SVG are ready
    ========================================================== */
 (function () {
-  const STATE_KEY = '__sfgSvgTools__';
+  // How far (in screen pixels) Isc nodes should sit left of their V partner
+  const ISC_OFFSET_PX = 10;
 
-  function state() {
-    if (!window[STATE_KEY]) {
-      window[STATE_KEY] = {
-        savedPositions: null,   // { id: {x,y} }
-        savedPan: null,         // {x,y}
-        savedZoom: null,        // number
-        markerLayer: null
-      };
-    }
-    return window[STATE_KEY];
+  // ----- Helpers -----
+
+  // Infer the logical SVG label from the SFG node id
+  // Vvin    -> vin
+  // Iscvin  -> vin
+  // Vn_vdd  -> n_vdd
+  // Iscn_vdd-> n_vdd
+  function baseLabelFromId(id) {
+    if (/^Isc/.test(id)) return id.slice(3); // drop 'Isc'
+    if (/^V/.test(id))   return id.slice(1); // drop leading 'V'
+    return id;
   }
 
-  // ---------------- DOM / overlay ----------------
-  function byId(id){ return document.getElementById(id); }
   function getOverlaySvg(){
-    const l = byId('svg-layer');
-    return l ? l.querySelector('svg') : null;
+    // 1. Prefer the actual schematic you already show below
+    const svg =
+      document.querySelector('#circuit-svg svg') ||
+      document.querySelector('#circuit-svg-small svg') ||
+      // 2. Fallback to any cloned SVG in the overlay, if present
+      document.querySelector('#svg-layer svg');
+
+    return svg || null;
   }
 
-  // If the cloned SVG is missing a viewBox, compute one from its bbox.
+
   function ensureSvgViewBox(svg) {
     if (!svg) return;
-    if (svg.hasAttribute('viewBox')) return;
-    try {
-      const b = svg.getBBox();
-      if (!isFinite(b.x) || !isFinite(b.y) || !isFinite(b.width) || !isFinite(b.height)) return;
-      svg.setAttribute('viewBox', `${b.x} ${b.y} ${Math.max(b.width,1)} ${Math.max(b.height,1)}`);
-    } catch (_) {
-      // Some SVGs may not support getBBox on the root; best effort only.
+    if (!svg.hasAttribute('viewBox')) {
+      try {
+        const b = svg.getBBox();
+        const w = Math.max(b.width, 1);
+        const h = Math.max(b.height, 1);
+        svg.setAttribute('viewBox', `${b.x} ${b.y} ${w} ${h}`);
+      } catch (_) {/* best-effort */}
     }
-    // Preserve aspect ratio to match most schematics
     if (!svg.hasAttribute('preserveAspectRatio')) {
       svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     }
-    // Always stretch to container
-    svg.removeAttribute('width'); svg.removeAttribute('height');
-    svg.style.width = '100%'; svg.style.height = '100%';
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    svg.style.width = '100%';
+    svg.style.height = '100%';
   }
 
-  function prepareOverlay() {
-    const overlay = byId('overlay-container');
-    const svgLayer = byId('svg-layer');
-    const sfgLayer = byId('sfg-layer');
-    if (!overlay || !svgLayer || !sfgLayer) {
-      console.warn('[overlay] Missing #overlay-container/#svg-layer/#sfg-layer');
-      return false;
-    }
-    overlay.style.position = 'relative';
-    overlay.style.overflow = 'hidden';
-    if ((parseFloat(getComputedStyle(overlay).height) || 0) < 300) {
-      overlay.style.height = '600px';
-    }
-    [svgLayer, sfgLayer].forEach(el => {
-      el.style.position = 'absolute';
-      el.style.top = el.style.left = el.style.right = el.style.bottom = '0';
-    });
-
-    // If svg-layer is empty, clone a schematic SVG into it
-    if (!svgLayer.querySelector('svg')) {
-      const host = document.querySelector('#circuit-svg svg') ||
-                   document.querySelector('#circuit-svg-small svg');
-      if (host) {
-        const clone = host.cloneNode(true);
-        svgLayer.innerHTML = '';
-        svgLayer.appendChild(clone);
-      }
-    }
-
-    // normalize SVG sizing
-    const svg = getOverlaySvg();
-    if (svg) ensureSvgViewBox(svg);
-
-    // Mount Cytoscape into #sfg-layer if needed
-    if (window.cy && typeof window.cy.mount === 'function') {
-      try { window.cy.mount(sfgLayer); } catch (e) { /* ignore */ }
-    }
-    return true;
-  }
-
-  // ---------------- coordinate helpers ----------------
-  function svgToClientFactory(svg){
-    return function(x,y){
-      const pt = svg.createSVGPoint(); pt.x=x; pt.y=y;
-      const m = svg.getScreenCTM(); if (!m) return null;
+  function svgToClientFactory(svg) {
+    return function (x, y) {
+      const pt = svg.createSVGPoint();
+      pt.x = x; pt.y = y;
+      const m = svg.getScreenCTM();
+      if (!m) return null;
       const p = pt.matrixTransform(m);
       return { x: Math.round(p.x), y: Math.round(p.y) };
     };
   }
 
-  // Convert viewport/client px → Cytoscape model coords (so node lands at that pixel)
-  function clientToModel(xc, yc){
-    const cy = window.cy;
-    const rect = cy.container().getBoundingClientRect();
-    const z = cy.zoom(), pan = cy.pan();
-    return { x: (xc - rect.left - pan.x)/z, y: (yc - rect.top - pan.y)/z };
-  }
-
-  // Live SFG client center for a node id (fresh each time)
-  function sfgClientFor(id){
-    const cy = window.cy;
-    const rect = cy.container().getBoundingClientRect();
-    const coll = cy.$id(id);
-    if (!coll || !coll.length) return { x:null, y:null };
-    const r = coll.renderedPosition();
-    return { x: Math.round(rect.left + r.x), y: Math.round(rect.top + r.y) };
-  }
-
-  // Center of an SVG <text> by label (case-insensitive) → client px
-  function svgClientForLabel(label){
-    const svg = getOverlaySvg(); if (!svg) return { x:null, y:null };
+  // Given a logical label (e.g. 'vin', 'n_vdd'), find the center of that <text> in client px
+  function svgClientForLabel(label) {
+    const svg = getOverlaySvg();
+    if (!svg) return { x: null, y: null };
+    ensureSvgViewBox(svg);
     const toClient = svgToClientFactory(svg);
-    const needle = String(label||'').trim().toLowerCase();
+    const needle = String(label || '').trim().toLowerCase();
     const texts = svg.querySelectorAll('text');
-    for (let i=0;i<texts.length;i++){
+    for (let i = 0; i < texts.length; i++) {
       const t = (texts[i].textContent || '').trim().toLowerCase();
       if (t === needle) {
         try {
           const b = texts[i].getBBox();
-          const c = toClient(b.x + b.width/2, b.y + b.height/2);
-          if (c) return { x:c.x, y:c.y };
-        } catch (_){}
+          const c = toClient(b.x + b.width / 2, b.y + b.height / 2);
+          if (c) return c;
+        } catch (_) {}
       }
     }
-    return { x:null, y:null };
+    return { x: null, y: null };
   }
 
-  // ---------------- mapping / rows ----------------
-  const DEFAULT_NAME_MAP = {
-    Vvin:'vin', Vvout:'vout', Vvd1:'vd1', Vvs1:'vs1', Vn_vdd:'n_VDD', I1:'I1'
-  };
-  function normalizeMap(m){ // lowercases only for lookup; we preserve original case in labels
-    const o={}; Object.keys(m||{}).forEach(k=>{ o[k]=m[k]; }); return o;
+  // Convert viewport/client px => Cytoscape model coords
+  function clientToModel(xc, yc) {
+    const cy = window.cy;
+    if (!cy) return { x: null, y: null };
+    const rect = cy.container().getBoundingClientRect();
+    const z   = cy.zoom();
+    const pan = cy.pan();
+    return {
+      x: (xc - rect.left - pan.x) / z,
+      y: (yc - rect.top  - pan.y) / z
+    };
   }
 
-  // Build fresh rows every call (no stale coordinates)
-  // returns [{ id, svg_label, matched, sfg_client_x, sfg_client_y, svg_client_x, svg_client_y }]
-  function mapSfgToSvgByText(overrides){
-    if (!prepareOverlay() || !window.cy) return [];
-    const MAP = normalizeMap(Object.assign({}, DEFAULT_NAME_MAP, overrides||{}));
+  // ----- Main placement logic -----
+
+  // Compute target client positions for all nodes, using the naming convention
+  function computeTargets({ iscOffsetPx = ISC_OFFSET_PX } = {}) {
+    const cy = window.cy;
+    if (!cy) return [];
     const rows = [];
-    window.cy.nodes().forEach(n=>{
+    cy.nodes().forEach(n => {
       const id = n.id();
-      const label = MAP[id] || id;                  // fallback try
-      const sfg = sfgClientFor(id);                 // LIVE SFG position
-      const svg = svgClientForLabel(label);
+      const label = baseLabelFromId(id);    // e.g. 'vin', 'n_vdd', etc.
+      let { x, y } = svgClientForLabel(label);
+
+      // Nudge Isc nodes a bit left of the SVG label
+      if (/^Isc/.test(id) && x != null) {
+        x = x - iscOffsetPx;
+      }
       rows.push({
         id,
-        svg_label: label,
-        matched: Number.isFinite(svg.x) && Number.isFinite(svg.y),
-        sfg_client_x: sfg.x, sfg_client_y: sfg.y,
-        svg_client_x: svg.x, svg_client_y: svg.y
+        label,
+        matched: Number.isFinite(x) && Number.isFinite(y),
+        client_x: x,
+        client_y: y
       });
     });
     return rows;
   }
 
-  // ---------------- markers (always recomputed) ----------------
-  function clearMarkers(){
-    const st = state();
-    if (st.markerLayer) { st.markerLayer.remove(); st.markerLayer = null; }
-  }
-
-  function drawSfgSvgMarkers(rows){
-    // recompute SFG positions to avoid drift after moves
-    const fresh = (rows || []).map(r=>{
-      const sfg = sfgClientFor(r.id);
-      return Object.assign({}, r, { sfg_client_x: sfg.x, sfg_client_y: sfg.y });
-    });
-
-    const overlay = byId('overlay-container');
-    if (!overlay) { console.warn('no #overlay-container'); return; }
-    clearMarkers();
-
-    const layer = document.createElement('div');
-    Object.assign(layer.style, { position:'absolute', inset:'0', pointerEvents:'none', zIndex: 999999 });
-    overlay.appendChild(layer);
-    state().markerLayer = layer;
-
-    function dot(x,y,color){ if(x==null||y==null) return;
-      const d=document.createElement('div');
-      Object.assign(d.style,{position:'absolute',left:(x-4)+'px',top:(y-4)+'px',width:'8px',height:'8px',borderRadius:'50%',background:color,outline:'1px solid #000'});
-      layer.appendChild(d);
-    }
-    function label(x,y,text,color){ if(x==null||y==null) return;
-      const t=document.createElement('div');
-      Object.assign(t.style,{position:'absolute',left:(x+6)+'px',top:(y-6)+'px',font:'11px/1.2 monospace',color});
-      t.textContent=text; layer.appendChild(t);
-    }
-
-    fresh.forEach(r=>{
-      // SFG now (blue)
-      dot(r.sfg_client_x, r.sfg_client_y, '#1e90ff');
-      label(r.sfg_client_x, r.sfg_client_y, r.id, '#1e90ff');
-
-      // SVG target (red)
-      if (r.matched) {
-        dot(r.svg_client_x, r.svg_client_y, '#e74c3c');
-        label(r.svg_client_x, r.svg_client_y, r.svg_label, '#e74c3c');
-      }
-    });
-
-    console.log('Markers drawn (blue=SFG id, red=SVG label).');
-  }
-
-  // ---------------- relocate & reset ----------------
-  function ensureSavedPositions(){
-    const st = state();
-    if (st.savedPositions) return; // already saved
-    if (!window.cy) return;
-    st.savedPositions = {};
-    window.cy.nodes().forEach(n => { st.savedPositions[n.id()] = { x:n.position('x'), y:n.position('y') }; });
-    st.savedPan  = Object.assign({}, window.cy.pan());
-    st.savedZoom = window.cy.zoom();
-  }
-
-  function relocateSfgNodesToSvg({ rows, animate = true, duration = 350 } = {}){
-    if (!window.cy) { console.warn('cy not ready'); return; }
-    if (!rows || !rows.length) { console.warn('relocate: pass rows from mapSfgToSvgByText()'); return; }
-    ensureSavedPositions();
-
-    const moved = [];
-    rows.forEach(r=>{
-      if (!r || !r.matched || r.svg_client_x==null || r.svg_client_y==null) return;
-      const coll = window.cy.$id(r.id);
-      if (!coll || !coll.length) return;
-      const model = clientToModel(r.svg_client_x, r.svg_client_y);
-      if (animate && typeof coll.animate === 'function') {
-        coll.animate({ position: model }, { duration });
-      } else {
-        coll.position(model);
-      }
-      moved.push({ id:r.id, to:model });
-    });
-
-    console.log(`Relocated ${moved.length} node(s).`, moved);
-  }
-
-  function resetSfgRelocation({ restoreView = true, animate = false, duration = 0 } = {}){
-    if (!window.cy) { console.warn('cy not ready'); return; }
-    const st = state();
-    if (!st.savedPositions) { console.warn('No saved positions to restore.'); return; }
-
+  // Place nodes at their SVG-derived positions
+  function sfgPlaceNodesFromSvg(options = {}) {
     const cy = window.cy;
-    Object.keys(st.savedPositions).forEach(id=>{
-      const coll = cy.$id(id);
-      if (!coll || !coll.length) return;
-      const pos = st.savedPositions[id];
-      if (animate && typeof coll.animate === 'function') {
-        coll.animate({ position: pos }, { duration });
+    if (!cy) {
+      console.warn('[sfgPlaceNodesFromSvg] cy not ready');
+      return 0;
+    }
+
+    const { animate = false, duration = 300, iscOffsetPx = ISC_OFFSET_PX } = options;
+    const rows = computeTargets({ iscOffsetPx });
+    let placed = 0;
+
+    rows.forEach(r => {
+      if (!r.matched) return;
+      const pos = clientToModel(r.client_x, r.client_y);
+      if (pos.x == null) return;
+      const node = cy.$id(r.id);
+      if (!node || !node.length) return;
+
+      if (animate && typeof node.animate === 'function') {
+        node.animate({ position: pos }, { duration });
       } else {
-        coll.position(pos);
+        node.position(pos);
       }
+      placed++;
     });
 
-    if (restoreView) {
-      if (typeof cy.zoom === 'function' && st.savedZoom != null) cy.zoom(st.savedZoom);
-      if (typeof cy.pan  === 'function' && st.savedPan)       cy.pan(st.savedPan);
+    console.log(`[sfgPlaceNodesFromSvg] placed ${placed} node(s) using dynamic naming.`);
+    return placed;
+  }
+
+  // Expose to console
+  window.sfgPlaceNodesFromSvg = sfgPlaceNodesFromSvg;
+
+  // ----- Auto-run once cy + SVG are ready -----
+  function autoPlaceWhenReady(attempt = 0) {
+    if (attempt > 80) {
+      console.warn('[sfgPlaceNodesFromSvg] gave up waiting for cy/SVG');
+      return;
     }
-
-    st.savedPositions = null;
-    st.savedPan = null;
-    st.savedZoom = null;
-    clearMarkers();
-    console.log('SFG node positions (and view) restored.');
-  }
-
-  // ---------------- quick inspectors ----------------
-  function printOverlayNodeCoords() {
-    if (!window.cy) { console.warn('cy not ready'); return []; }
-    const rect = window.cy.container().getBoundingClientRect();
-    const rows = window.cy.nodes().map(n=>{
-      const m = n.position(), r = n.renderedPosition();
-      return { id:n.id(), model_x:m.x, model_y:m.y, client_x: Math.round(rect.left+r.x), client_y: Math.round(rect.top+r.y) };
-    });
-    console.table(rows);
-    return rows;
-  }
-
-  function printSvgIndex() {
-    const svg = getOverlaySvg();
-    if (!svg) { console.warn('No SVG found in #svg-layer'); return []; }
-    ensureSvgViewBox(svg); // normalize first
-    const toClient = svgToClientFactory(svg);
-    const out = [];
-    svg.querySelectorAll('*').forEach((el, i) => {
-      const tag   = el.tagName.toLowerCase();
-      const id    = el.id || '';
-      const klass = (el.getAttribute('class') || '').trim();
-      const text  = (tag === 'text') ? (el.textContent || '').trim() : '';
-      let bbStr = '', cx = null, cy = null;
-      try {
-        const bb = el.getBBox();
-        bbStr = `${(+bb.width).toFixed(1)}×${(+bb.height).toFixed(1)}`;
-        const c = toClient(bb.x + bb.width/2, bb.y + bb.height/2);
-        if (c) { cx = c.x; cy = c.y; }
-      } catch (_) { /* some nodes have no bbox */ }
-      out.push({ i, tag, id, class: klass, text, bb: bbStr, cx, cy });
-    });
-    console.table(out);
-    return out;
-  }
-
-  // ---------------- exports ----------------
-  window.mapSfgToSvgByText     = window.mapSfgToSvgByText || mapSfgToSvgByText;
-  window.drawSfgSvgMarkers     = drawSfgSvgMarkers;
-  window.relocateSfgNodesToSvg = relocateSfgNodesToSvg;
-  window.resetSfgRelocation    = resetSfgRelocation;
-  window.printOverlayNodeCoords= window.printOverlayNodeCoords || printOverlayNodeCoords;
-  window.printSvgIndex         = window.printSvgIndex || printSvgIndex;
-
-  console.log('[SFG/SVG overlay: live markers + viewBox normalization ready]');
-})();
-
-/* ===== Fixed-coordinate labeled markers (exact viewport positions) ===== */
-(function(){
-  // Delete any prior markers (fixed-mode)
-  function clearFixedMarkers(){
-    document.querySelectorAll('.overlay-marker-fixed,.overlay-marker-label-fixed').forEach(n => n.remove());
-  }
-
-  // Live SFG client center for a node id
-  function _sfgClientFor(id){
-    if (!window.cy) return { x:null, y:null };
-    const rect = window.cy.container().getBoundingClientRect();
-    const coll = window.cy.$id(id);
-    if (!coll || !coll.length) return { x:null, y:null };
-    const r = coll.renderedPosition();
-    return { x: Math.round(rect.left + r.x), y: Math.round(rect.top + r.y) };
-  }
-
-  // Draw markers using position:fixed so client coords land exactly
-  function drawSfgSvgMarkersFixed(rows){
-    if (!rows || !rows.length) { console.warn('drawSfgSvgMarkersFixed: pass rows'); return; }
-
-    // Recompute SFG positions (avoid stale coords)
-    const fresh = rows.map(r => {
-      const s = _sfgClientFor(r.id);
-      return Object.assign({}, r, { sfg_client_x: s.x, sfg_client_y: s.y });
-    });
-
-    clearFixedMarkers();
-
-    function dot(x, y, color, title){
-      if (x == null || y == null) return;
-      const d = document.createElement('div');
-      d.className = 'overlay-marker-fixed';
-      Object.assign(d.style, {
-        position: 'fixed',
-        left: (x - 4) + 'px',
-        top:  (y - 4) + 'px',
-        width: '8px',
-        height:'8px',
-        borderRadius:'50%',
-        background: color,
-        outline: '1px solid #000',
-        zIndex: 2147483647
-      });
-      if (title) d.title = title;
-      document.body.appendChild(d);
+    const cyReady  = !!(window.cy && window.cy.nodes && window.cy.nodes().length);
+    const svgReady = !!getOverlaySvg();
+    if (cyReady && svgReady) {
+      // small delay to let layout/DOM settle
+      setTimeout(() => sfgPlaceNodesFromSvg({ animate: false }), 50);
+      return;
     }
-    function label(x, y, text, color){
-      if (x == null || y == null) return;
-      const t = document.createElement('div');
-      t.className = 'overlay-marker-label-fixed';
-      Object.assign(t.style, {
-        position: 'fixed',
-        left: (x + 6) + 'px',
-        top:  (y - 6) + 'px',
-        font: '11px/1.2 monospace',
-        color: color,
-        pointerEvents: 'none',
-        zIndex: 2147483647
-      });
-      t.textContent = text;
-      document.body.appendChild(t);
-    }
-
-    // Blue = SFG node id; Red = SVG label
-    fresh.forEach(r => {
-      dot(r.sfg_client_x, r.sfg_client_y, '#1e90ff', `SFG ${r.id}`);
-      label(r.sfg_client_x, r.sfg_client_y, r.id, '#1e90ff');
-
-      if (r.matched) {
-        dot(r.svg_client_x, r.svg_client_y, '#e74c3c', `SVG ${r.svg_label}`);
-        label(r.svg_client_x, r.svg_client_y, r.svg_label, '#e74c3c');
-      }
-    });
-
-    console.log('Markers (fixed) drawn: blue=SFG, red=SVG.');
+    setTimeout(() => autoPlaceWhenReady(attempt + 1), 150);
   }
-
-  // Expose: keep your old name as a wrapper so existing calls work
-  window.drawSfgSvgMarkersFixed = drawSfgSvgMarkersFixed;
-  window.drawSfgSvgMarkers = drawSfgSvgMarkersFixed; // override previous implementation
-  window.clearSfgSvgMarkers = clearFixedMarkers;
+  autoPlaceWhenReady(0);
 })();
