@@ -4,6 +4,7 @@ const circuitId = sessionStorage.getItem('circuitId');
 
 let [simplify_mode, node1, node2] = [false, null, null];
 let [highlight_mode, hlt_src, hlt_tgt] = [false, null, null];
+
 const SYMBOLIC_LABEL_BASE_FONT = 24;
 const EDGE_BASE_CURVE_DISTANCE = 220;
 const EDGE_CURVE_SPACING = 150;
@@ -116,7 +117,7 @@ if (!circuitId) {
     window.location.replace('./landing.html');
 }
 
-var symbolic_flag = true //feature toggle
+var symbolic_flag = false //feature toggle
 var tf_flag = false //transfer function toggle
 var lg_flag = false //loop gain toggle
 var tf = {}
@@ -158,7 +159,7 @@ function edge_helper(sample_data, flag) {
         edge_symbolic_label[i] = new_edge.data.weight.symbolic
         // TODO MARK
         // call sfg_patch_request (with or without rerendering) to send to backend
-
+        
         // Represent magnitude with 2 decimal points exponent
         let magnitude = expo((new_edge.data.weight.magnitude), 2).toString()
         let phase = new_edge.data.weight.phase.toFixed(2).toString()
@@ -178,528 +179,520 @@ function edge_helper(sample_data, flag) {
 // log sfg module loading time
 const time1 = new Date()
 
-function make_sfg(elements) {
-    var cy = window.cy = cytoscape({
-        container: document.getElementById('cy'),
 
-        layout: {
-            name: 'dagre',
-            nodeSep: 200,
-            edgeSep: 220,
-            rankSep: 120,
-            rankDir: 'LR',
-            fit: true,
-            minLen: function( edge ){ return 2 }
-        },
-        wheelSensitivity: 0.4,
-        style: [
-        {
-            selector: 'node[name]',
-            style: {
-            'content': 'data(name)',
-            'font-size': '26px',
-            'text-outline-width': '8',
-            'text-outline-color': '#E8E8E8',
-            'width': '84px',
-            'height': '84px',
-            'background-color': '#5aa5ff',
-            'border-width': '4px',
-            'border-color': '#4a90e2',
-            'background-fill': 'radial-gradient',
-            'background-gradient-stop-colors': '#ffffff #5aa5ff',
-            'background-gradient-stop-positions': '0% 100%',
-            'shadow-blur': 18,
-            'shadow-color': '#2d5aa0',
-            'shadow-opacity': 0.25,
-            'shadow-offset-x': 0,
-            'shadow-offset-y': 4,
-            'text-valign': 'center',
-            'text-halign': 'center'
-            }
-        },
+// Shared SFG style so sfg-section and overlay-section look identical
+function getSfgStyles() {
+  return [
+    {
+      selector: 'node[name]',
+      style: {
+        'content': 'data(name)',
+        'font-size': '26px',
+        'text-outline-width': '8',
+        'text-outline-color': '#E8E8E8',
+        'width': '84px',
+        'height': '84px',
+        'background-color': '#5aa5ff',
+        'border-width': '4px',
+        'border-color': '#4a90e2',
+        'background-fill': 'radial-gradient',
+        'background-gradient-stop-colors': '#ffffff #5aa5ff',
+        'background-gradient-stop-positions': '0% 100%',
+        'shadow-blur': 18,
+        'shadow-color': '#2d5aa0',
+        'shadow-opacity': 0.25,
+        'shadow-offset-x': 0,
+        'shadow-offset-y': 4,
+        'text-valign': 'center',
+        'text-halign': 'center'
+      }
+    },
+    {
+      selector: 'node[Vin]',
+      style: {
+        'background-color': 'red'
+      }
+    },
+    {
+      selector: 'edge',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distance': 'data(controlPointDistance)',
+        'control-point-weight': 'data(controlPointWeight)',
+        'control-point-step-size': EDGE_CURVE_SPACING,
+        'width': 5,
+        'line-color': '#4a90e2',
+        'target-arrow-shape': 'triangle',
+        'arrow-scale': 1.2,
+        'target-arrow-color': '#4a90e2',
+        'source-arrow-color': '#4a90e2',
+        'content': 'data(weight)',
+        'font-size': '24px',
+        'edge-text-rotation': 'autorotate',
+        'text-margin-y': 'data(labelOffset)',
+        'text-outline-width': 8,
+        'text-outline-color': '#E8E8E8'
+      }
+    },
 
-        {
-            selector: 'node[Vin]',
-            style: {
-            'background-color': 'red',
-            }
-        },
-
-        {
-            selector: 'edge',
-            style: {
-            'curve-style': 'unbundled-bezier',
-            'control-point-distance': 'data(controlPointDistance)',
-            'control-point-weight': 'data(controlPointWeight)',
-            'control-point-step-size': EDGE_CURVE_SPACING,
-            'width': 5,
-            'line-color': '#4a90e2',
-            //'curve-style': 'bezier',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 1.2,
-            'target-arrow-color': '#4a90e2',
-            'source-arrow-color': '#4a90e2',
-            'content': 'data(weight)',
-            'font-size': '24px',
-            'edge-text-rotation': 'autorotate',
-            'text-margin-y': 'data(labelOffset)',
-            'text-outline-width': '8',
-            'text-outline-color': '#E8E8E8'
-            }
-        },
-
-        {
-            selector: '.eh-handle',
-            style: {
-            'background-color': 'red',
-            'width': 12,
-            'height': 12,
-            'shape': 'ellipse',
-            'overlay-opacity': 0,
-            'border-width': 12, // makes the handle easier to hit
-            'border-opacity': 0
-            }
-        },
-
-        {
-            selector: '.eh-hover',
-            style: {
-            'background-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-source',
-            style: {
-            'border-width': 2,
-            'border-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-target',
-            style: {
-            'border-width': 2,
-            'border-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-preview, .eh-ghost-edge',
-            style: {
-            'background-color': 'red',
-            'line-color': 'red',
-            'target-arrow-color': 'red',
-            'source-arrow-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-ghost-edge.eh-preview-active',
-            style: {
-            'opacity': 0
-            }
-        },
-        {
-            selector: ':selected',
-            style: {
-                'background-color': '#0069d9'
-            }
-        }
-        ,
-        {   // Style for the most dominant path
-            selector: '.highlighted',
-              style: {
-                'background-color': 'red',
-                'line-color': 'red',
-                'target-arrow-color': 'red',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-
-        {   // Style for cycles within the path
-            selector: '.cycle',
-              style: {
-                'background-color': 'blue',
-                'line-color': 'blue',
-                'target-arrow-color': 'blue',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Style for the weakest path
-            selector: '.weak_path',
-              style: {
-                'background-color': 'yellow',
-                'line-color': 'yellow',
-                'target-arrow-color': 'yellow',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Style for the common edges
-            selector: '.common_edge',
-              style: {
-                'background-color': 'purple',
-                'line-color': 'purple',
-                'target-arrow-color': 'purple',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Source Node for the Dominant path finder
-            selector: '.pink',
-              style: {
-                'background-color': '#d90069',
-                'line-color': '#d90069',
-                'target-arrow-color': '#d90069',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Target node for dominant path finder
-            selector: '.green',
-              style: {
-                'background-color': '#2E8B57',
-                'line-color': '#2E8B57',
-                'target-arrow-color': '#2E8B57',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        }
-        ],
-        elements: elements
-    });
-
-    setupEdgeCurveCurvature(cy);
-
-    // log all nodes and edges of sfg
-    console.log("nodes:", cy.nodes());
-    // log node ids
-    console.log("node ids:", cy.nodes().map(node => node.id()));
-    console.log("edges:", cy.edges());
-
-    cy.on('tap', 'node', function(evt){
-        if(simplify_mode) {
-            let node = evt.target;
-            console.log( 'tapped ' + node.id() );
-            if (node === node1) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                node1 = null;
-            }
-            else if(node === node2) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                node2 = null;
-            }
-            else if(node1 === null){
-                cy.$('#'+node.id()).css({'background-color': '#03af03'})
-                node1 = node;
-            }
-            else if(node2 === null){
-                cy.$('#'+node.id()).css({'background-color': '#f8075a'})
-                node2 = node;
-            }
-        }
-        if(highlight_mode){
-            let node = evt.target;
-            console.log( 'tapped ' + node.id() );
-            if (node === hlt_src) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                hlt_src = null;
-            }
-            else if(node === hlt_tgt) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                hlt_tgt = null;
-            }
-            else if(hlt_src === null){ // sets highlight source node to green
-                cy.$('#'+node.id()).css({'background-color': '#03af03'})
-                hlt_src = node;
-            }
-            else if(hlt_tgt === null){ // sets highlight target node to red
-                cy.$('#'+node.id()).css({'background-color': '#f8075a'})
-                hlt_tgt = node;
-            }
-            if(hlt_src != null & hlt_tgt != null){
-                console.log("Time to highlight:)")
-                HighlightPath()
-            }else{
-                removeHighlightPrevious()
-            }
-        }
-    });
-
-
-    // Initialize edge hover functionality
-    initializeEdgeHover();
-
-    const time2 = new Date();
-    let time_elapse = (time2 - time1)/1000;
-    console.log("elements:", elements);
-    console.log("make_sfg SFG loading time: " + time_elapse + " seconds");
+    // --- existing highlight / path styles to keep behaviour ---
+    {
+      selector: ':selected',
+      style: {
+        'background-color': '#0069d9'
+      }
+    },
+    {
+      selector: '.highlighted',
+      style: {
+        'background-color': 'red',
+        'line-color': 'red',
+        'target-arrow-color': 'red',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.cycle',
+      style: {
+        'background-color': 'blue',
+        'line-color': 'blue',
+        'target-arrow-color': 'blue',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.weak_path',
+      style: {
+        'background-color': 'yellow',
+        'line-color': 'yellow',
+        'target-arrow-color': 'yellow',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.common_edge',
+      style: {
+        'background-color': 'purple',
+        'line-color': 'purple',
+        'target-arrow-color': 'purple',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.pink',
+      style: {
+        'background-color': '#d90069',
+        'line-color': '#d90069',
+        'target-arrow-color': '#d90069',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.green',
+      style: {
+        'background-color': '#2E8B57',
+        'line-color': '#2E8B57',
+        'target-arrow-color': '#2E8B57',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    }
+  ];
 }
 
+
+
+// Reusable factory to create an SFG Cytoscape instance
+function createSfgInstance(container, elements, extraOptions = {}) {
+  return cytoscape(Object.assign({
+    container,
+    layout: {
+      name: 'dagre',
+      nodeSep: 200,
+      edgeSep: 220,
+      rankSep: 120,
+      rankDir: 'LR',
+      fit: true,
+      minLen: function(edge){ return 2; }
+    },
+    wheelSensitivity: 0.4,
+    style: getSfgStyles(),
+    elements
+  }, extraOptions));
+}
+
+// Keep a handle to the overlay instance
+let overlayCy = null;
+
+// Copy node positions from overlay to main, so placements match
+function syncOverlayPositionsToMain(overlay, main) {
+  if (!overlay || !main) return;
+
+  const overlayPositions = {};
+  overlay.nodes().forEach(n => {
+    overlayPositions[n.id()] = n.position();
+  });
+
+  main.nodes().forEach(n => {
+    const pos = overlayPositions[n.id()];
+    if (pos) {
+      n.position(pos);
+    }
+  });
+
+  main.fit();  // adjust zoom in sfg-section so everything is visible
+}
+
+function make_sfg(elements) {
+  const container = document.getElementById('cy');
+  if (!container) {
+    console.warn('make_sfg: #cy container not found');
+    return;
+  }
+
+  var cy = window.cy = createSfgInstance(container, elements);
+  setupEdgeCurveCurvature(cy);
+
+  // make lines straight when aligned
+  cy.edges().forEach((edge, idx) => {
+    if (
+      (edge.sourceEndpoint().x === edge.targetEndpoint().x ||
+       edge.sourceEndpoint().y === edge.targetEndpoint().y) &&
+      edge.source().edgesWith(edge.target()).length === 1
+    ) {
+      edge.data('controlPointDistance', 0);
+      edge.data('controlPointWeight', 0.5);
+    }
+  });
+
+  // log all nodes and edges of sfg
+  console.log("nodes:", cy.nodes());
+  console.log("node ids:", cy.nodes().map(node => node.id()));
+  console.log("edges:", cy.edges());
+
+  cy.on('tap', 'node', function(evt){
+    if (simplify_mode) {
+      let node = evt.target;
+      console.log('tapped ' + node.id());
+      if (node === node1) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        node1 = null;
+      }
+      else if (node === node2) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        node2 = null;
+      }
+      else if (node1 === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#03af03' });
+        node1 = node;
+      }
+      else if (node2 === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#f8075a' });
+        node2 = node;
+      }
+    }
+    if (highlight_mode) {
+      let node = evt.target;
+      console.log('tapped ' + node.id());
+      if (node === hlt_src) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        hlt_src = null;
+      }
+      else if (node === hlt_tgt) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        hlt_tgt = null;
+      }
+      else if (hlt_src === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#03af03' });
+        hlt_src = node;
+      }
+      else if (hlt_tgt === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#f8075a' });
+        hlt_tgt = node;
+      }
+      if (hlt_src != null & hlt_tgt != null) {
+        console.log("Time to highlight:)");
+        HighlightPath();
+      } else {
+        removeHighlightPrevious();
+      }
+    }
+  });
+
+  // Initialize edge hover functionality
+  initializeEdgeHover();
+
+  const time2 = new Date();
+  let time_elapse = (time2 - time1)/1000;
+  console.log("elements:", elements);
+  console.log("make_sfg SFG loading time: " + time_elapse + " seconds");
+}
 
 function setupEdgeCurveCurvature(cy) {
-    if (!cy || cy.destroyed()) {
-        return;
-    }
+  if (!cy || cy.destroyed()) {
+    return;
+  }
 
-    const scheduleUpdate = () => scheduleEdgeCurveUpdate(cy);
+  const scheduleUpdate = () => scheduleEdgeCurveUpdate(cy);
 
-    scheduleUpdate();
-    cy.on('layoutstop', scheduleUpdate);
-    cy.on('add remove', 'edge', scheduleUpdate);
-    cy.on('position', 'node', scheduleUpdate);
+  scheduleUpdate();
+  cy.on('layoutstop', scheduleUpdate);
+  cy.on('add remove', 'edge', scheduleUpdate);
+  cy.on('position', 'node', scheduleUpdate);
 }
-
 
 function applyEdgeCurves(cy) {
-    if (!cy || cy.destroyed()) {
-        return;
+  if (!cy || cy.destroyed()) {
+    return;
+  }
+
+  cy.edges().forEach((edge, idx) => {
+    if (!edge || !edge.isEdge() || edge.destroyed()) {
+      return;
     }
 
-    cy.edges().forEach((edge, idx) => {
-        if (!edge || !edge.isEdge() || edge.destroyed()) {
-            return;
+    edge.data('symbolicIndex', idx);
+
+    if (edge.data('labelOffset') === undefined || edge.data('labelOffset') === null) {
+      edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
+    }
+  });
+
+  const groupedOutgoing = new Map();
+  const groupedIncoming = new Map();
+  const pairedEdges = new Map();
+
+  cy.edges().forEach(edge => {
+    if (!edge.isEdge() || edge.destroyed()) {
+      return;
+    }
+
+    const sourceEndpoint = edge.sourceEndpoint();
+    const targetEndpoint = edge.targetEndpoint();
+
+    if (!sourceEndpoint || !targetEndpoint) {
+      return;
+    }
+
+    const isVertical = Math.abs(sourceEndpoint.x - targetEndpoint.x) < 1;
+    const isHorizontal = Math.abs(sourceEndpoint.y - targetEndpoint.y) < 1;
+    const isSingleConnection = edge.source().edgesWith(edge.target()).length === 1;
+
+    if ((isVertical || isHorizontal) && isSingleConnection) {
+      edge.scratch('_forceStraight', true);
+      edge.data('controlPointDistance', 0);
+      edge.data('controlPointWeight', 0.5);
+      return;
+    }
+
+    edge.removeScratch('_forceStraight');
+
+    const outKey = edge.source().id();
+    const inKey = edge.target().id();
+
+    if (!groupedOutgoing.has(outKey)) {
+      groupedOutgoing.set(outKey, []);
+    }
+    if (!groupedIncoming.has(inKey)) {
+      groupedIncoming.set(inKey, []);
+    }
+
+    groupedOutgoing.get(outKey).push(edge);
+    groupedIncoming.get(inKey).push(edge);
+
+    const pairKey = `${edge.source().id()}->${edge.target().id()}`;
+
+    if (!pairedEdges.has(pairKey)) {
+      pairedEdges.set(pairKey, []);
+    }
+
+    pairedEdges.get(pairKey).push(edge);
+  });
+
+  const assignRank = (collection, accessor, rankKey, sizeKey) => {
+    if (!collection || collection.length === 0) {
+      return;
+    }
+
+    collection.forEach(edge => edge.scratch(sizeKey, collection.length));
+
+    if (collection.length === 1) {
+      collection[0].scratch(rankKey, 0);
+      return;
+    }
+
+    collection
+      .sort((a, b) => accessor(a) - accessor(b))
+      .forEach((edge, idx) => {
+        const offset = idx - (collection.length - 1) / 2;
+        edge.scratch(rankKey, offset);
+      });
+  };
+
+  groupedOutgoing.forEach(edges => {
+    assignRank(edges, edge => edge.target().position('y'), '_outRank', '_outSize');
+  });
+
+  groupedIncoming.forEach(edges => {
+    assignRank(edges, edge => edge.source().position('y'), '_inRank', '_inSize');
+  });
+
+  pairedEdges.forEach(edges => {
+    edges
+      .sort((a, b) => {
+        const targetDiff = a.target().position('y') - b.target().position('y');
+
+        if (targetDiff !== 0) {
+          return targetDiff;
         }
 
-        edge.data('symbolicIndex', idx);
+        const sourceDiff = a.source().position('y') - b.source().position('y');
 
-        if (edge.data('labelOffset') === undefined || edge.data('labelOffset') === null) {
-            edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
-        }
-    });
-
-    const groupedOutgoing = new Map();
-    const groupedIncoming = new Map();
-    const pairedEdges = new Map();
-
-    cy.edges().forEach(edge => {
-        if (!edge.isEdge() || edge.destroyed()) {
-            return;
+        if (sourceDiff !== 0) {
+          return sourceDiff;
         }
 
-        const sourceEndpoint = edge.sourceEndpoint();
-        const targetEndpoint = edge.targetEndpoint();
+        return a.id().localeCompare(b.id());
+      })
+      .forEach((edge, idx) => {
+        edge.scratch('_pairIndex', idx);
+        edge.scratch('_pairSize', edges.length);
+      });
+  });
 
-        if (!sourceEndpoint || !targetEndpoint) {
-            return;
-        }
+  const positions = cy.nodes().map(node => node.position());
+  const center = positions.reduce((acc, pos) => {
+    acc.x += pos.x;
+    acc.y += pos.y;
+    return acc;
+  }, { x: 0, y: 0 });
 
-        const isVertical = Math.abs(sourceEndpoint.x - targetEndpoint.x) < 1;
-        const isHorizontal = Math.abs(sourceEndpoint.y - targetEndpoint.y) < 1;
-        const isSingleConnection = edge.source().edgesWith(edge.target()).length === 1;
+  if (positions.length) {
+    center.x /= positions.length;
+    center.y /= positions.length;
+  }
 
-        if ((isVertical || isHorizontal) && isSingleConnection) {
-            edge.scratch('_forceStraight', true);
-            edge.data('controlPointDistance', 0);
-            edge.data('controlPointWeight', 0.5);
-            return;
-        }
+  const bbox = cy.elements().boundingBox();
+  const maxRadius = Math.max(bbox.w, bbox.h) / 2;
+  const safeRadius = Math.max(maxRadius, 1);
 
-        edge.removeScratch('_forceStraight');
+  cy.edges().forEach(edge => {
+    if (!edge.isEdge() || edge.destroyed()) {
+      return;
+    }
 
-        const outKey = edge.source().id();
-        const inKey = edge.target().id();
+    const forceStraight = edge.scratch('_forceStraight');
+    const outRank = edge.scratch('_outRank') || 0;
+    const inRank = edge.scratch('_inRank') || 0;
+    const outSize = edge.scratch('_outSize') || 1;
+    const inSize = edge.scratch('_inSize') || 1;
+    const pairIndex = edge.scratch('_pairIndex') || 0;
+    const pairSize = edge.scratch('_pairSize') || 1;
 
-        if (!groupedOutgoing.has(outKey)) {
-            groupedOutgoing.set(outKey, []);
-        }
-        if (!groupedIncoming.has(inKey)) {
-            groupedIncoming.set(inKey, []);
-        }
-
-        groupedOutgoing.get(outKey).push(edge);
-        groupedIncoming.get(inKey).push(edge);
-
-        const pairKey = `${edge.source().id()}->${edge.target().id()}`;
-
-        if (!pairedEdges.has(pairKey)) {
-            pairedEdges.set(pairKey, []);
-        }
-
-        pairedEdges.get(pairKey).push(edge);
-    });
-
-    const assignRank = (collection, accessor, rankKey, sizeKey) => {
-        if (!collection || collection.length === 0) {
-            return;
-        }
-
-        collection.forEach(edge => edge.scratch(sizeKey, collection.length));
-
-        if (collection.length === 1) {
-            collection[0].scratch(rankKey, 0);
-            return;
-        }
-
-        collection
-            .sort((a, b) => accessor(a) - accessor(b))
-            .forEach((edge, idx) => {
-                const offset = idx - (collection.length - 1) / 2;
-                edge.scratch(rankKey, offset);
-            });
+    const cleanupScratch = () => {
+      edge.removeScratch('_outRank');
+      edge.removeScratch('_inRank');
+      edge.removeScratch('_outSize');
+      edge.removeScratch('_inSize');
+      edge.removeScratch('_pairIndex');
+      edge.removeScratch('_pairSize');
     };
 
-    groupedOutgoing.forEach(edges => {
-        assignRank(edges, edge => edge.target().position('y'), '_outRank', '_outSize');
-    });
+    const sourcePos = edge.source().position();
+    const targetPos = edge.target().position();
+    const dx = targetPos.x - sourcePos.x;
+    const dy = targetPos.y - sourcePos.y;
+    const spanLength = Math.hypot(dx, dy);
+    const midX = (sourcePos.x + targetPos.x) / 2;
+    const midY = (sourcePos.y + targetPos.y) / 2;
+    const toCenterX = midX - center.x;
+    const toCenterY = midY - center.y;
+    const centerDistance = Math.hypot(toCenterX, toCenterY);
+    const norm = spanLength === 0 ? 1 : spanLength;
+    const perpX = -dy / norm;
+    const perpY = dx / norm;
+    const outward = perpX * toCenterX + perpY * toCenterY;
+    const combinedOffset = outRank - inRank;
+    let directionSign = outward >= 0 ? 1 : -1;
 
-    groupedIncoming.forEach(edges => {
-        assignRank(edges, edge => edge.source().position('y'), '_inRank', '_inSize');
-    });
-
-    pairedEdges.forEach(edges => {
-        edges
-            .sort((a, b) => {
-                const targetDiff = a.target().position('y') - b.target().position('y');
-
-                if (targetDiff !== 0) {
-                    return targetDiff;
-                }
-
-                const sourceDiff = a.source().position('y') - b.source().position('y');
-
-                if (sourceDiff !== 0) {
-                    return sourceDiff;
-                }
-
-                return a.id().localeCompare(b.id());
-            })
-            .forEach((edge, idx) => {
-                edge.scratch('_pairIndex', idx);
-                edge.scratch('_pairSize', edges.length);
-            });
-    });
-
-    const positions = cy.nodes().map(node => node.position());
-    const center = positions.reduce((acc, pos) => {
-        acc.x += pos.x;
-        acc.y += pos.y;
-        return acc;
-    }, { x: 0, y: 0 });
-
-    if (positions.length) {
-        center.x /= positions.length;
-        center.y /= positions.length;
+    if (Math.abs(outward) < 0.01) {
+      if (combinedOffset !== 0) {
+        directionSign = combinedOffset > 0 ? 1 : -1;
+      } else if (dy !== 0) {
+        directionSign = dy > 0 ? 1 : -1;
+      }
     }
 
-    const bbox = cy.elements().boundingBox();
-    const maxRadius = Math.max(bbox.w, bbox.h) / 2;
-    const safeRadius = Math.max(maxRadius, 1);
+    const outSpread = outSize > 1 ? outRank / ((outSize - 1) / 2) : 0;
+    const inSpread = inSize > 1 ? inRank / ((inSize - 1) / 2) : 0;
+    const spreadMagnitude = Math.abs(outRank) + Math.abs(inRank);
+    const pairSpread = pairSize > 1 ? pairIndex - (pairSize - 1) / 2 : 0;
+    const normalizedPairSpread = pairSize > 1 ? pairSpread / ((pairSize - 1) / 2) : 0;
 
-    cy.edges().forEach(edge => {
-        if (!edge.isEdge() || edge.destroyed()) {
-            return;
-        }
+    const labelWidth = measureEdgeLabelWidth(edge);
+    const labelRatio = spanLength > 0 ? labelWidth / spanLength : 1;
+    const labelDirectionBias = directionSign * EDGE_LABEL_OFFSET_STEP * 0.55;
+    const labelCrowdingBias = combinedOffset * EDGE_LABEL_OFFSET_STEP * 0.35;
+    const pairLaneBias = normalizedPairSpread * EDGE_LABEL_OFFSET_STEP * 1.15;
+    const rawLabelOffset = EDGE_LABEL_OFFSET_BASE + labelDirectionBias + labelCrowdingBias + pairLaneBias;
+    const labelOffset = Math.max(-220, Math.min(220, rawLabelOffset));
 
-        const forceStraight = edge.scratch('_forceStraight');
-        const outRank = edge.scratch('_outRank') || 0;
-        const inRank = edge.scratch('_inRank') || 0;
-        const outSize = edge.scratch('_outSize') || 1;
-        const inSize = edge.scratch('_inSize') || 1;
-        const pairIndex = edge.scratch('_pairIndex') || 0;
-        const pairSize = edge.scratch('_pairSize') || 1;
+    edge.data('labelOffset', labelOffset);
 
-        const cleanupScratch = () => {
-            edge.removeScratch('_outRank');
-            edge.removeScratch('_inRank');
-            edge.removeScratch('_outSize');
-            edge.removeScratch('_inSize');
-            edge.removeScratch('_pairIndex');
-            edge.removeScratch('_pairSize');
-        };
+    if (forceStraight) {
+      cleanupScratch();
+      return;
+    }
 
-        const sourcePos = edge.source().position();
-        const targetPos = edge.target().position();
-        const dx = targetPos.x - sourcePos.x;
-        const dy = targetPos.y - sourcePos.y;
-        const spanLength = Math.hypot(dx, dy);
-        const midX = (sourcePos.x + targetPos.x) / 2;
-        const midY = (sourcePos.y + targetPos.y) / 2;
-        const toCenterX = midX - center.x;
-        const toCenterY = midY - center.y;
-        const centerDistance = Math.hypot(toCenterX, toCenterY);
-        const norm = spanLength === 0 ? 1 : spanLength;
-        const perpX = -dy / norm;
-        const perpY = dx / norm;
-        const outward = perpX * toCenterX + perpY * toCenterY;
-        const combinedOffset = outRank - inRank;
-        let directionSign = outward >= 0 ? 1 : -1;
+    let magnitude = EDGE_BASE_CURVE_DISTANCE;
+    magnitude += spreadMagnitude * (EDGE_CURVE_SPACING * 0.6);
+    magnitude += Math.abs(combinedOffset) * (EDGE_CURVE_SPACING * 0.4);
+    magnitude += Math.abs(pairSpread) * (EDGE_CURVE_SPACING * 1.1);
+    magnitude += labelWidth * EDGE_LABEL_WIDTH_SCALE;
 
-        if (Math.abs(outward) < 0.01) {
-            if (combinedOffset !== 0) {
-                directionSign = combinedOffset > 0 ? 1 : -1;
-            } else if (dy !== 0) {
-                directionSign = dy > 0 ? 1 : -1;
-            }
-        }
+    if (labelRatio > 0.85) {
+      magnitude += (labelRatio - 0.85) * EDGE_CURVE_SPACING * 2.1;
+    }
 
-        const outSpread = outSize > 1 ? outRank / ((outSize - 1) / 2) : 0;
-        const inSpread = inSize > 1 ? inRank / ((inSize - 1) / 2) : 0;
-        const spreadMagnitude = Math.abs(outRank) + Math.abs(inRank);
-        const pairSpread = pairSize > 1 ? pairIndex - (pairSize - 1) / 2 : 0;
-        const normalizedPairSpread = pairSize > 1 ? pairSpread / ((pairSize - 1) / 2) : 0;
+    if (spanLength > EDGE_CURVE_LENGTH_BASE) {
+      magnitude += ((spanLength - EDGE_CURVE_LENGTH_BASE) / EDGE_CURVE_LENGTH_SCALE) * EDGE_CURVE_SPACING;
+    }
 
-        const labelWidth = measureEdgeLabelWidth(edge);
-        const labelRatio = spanLength > 0 ? labelWidth / spanLength : 1;
-        const labelDirectionBias = directionSign * EDGE_LABEL_OFFSET_STEP * 0.55;
-        const labelCrowdingBias = combinedOffset * EDGE_LABEL_OFFSET_STEP * 0.35;
-        const pairLaneBias = normalizedPairSpread * EDGE_LABEL_OFFSET_STEP * 1.15;
-        const rawLabelOffset = EDGE_LABEL_OFFSET_BASE + labelDirectionBias + labelCrowdingBias + pairLaneBias;
-        const labelOffset = Math.max(-220, Math.min(220, rawLabelOffset));
+    if (spanLength < labelWidth * 0.9) {
+      magnitude += (labelWidth * 0.9 - spanLength) * 0.9;
+    }
 
-        edge.data('labelOffset', labelOffset);
+    if (centerDistance <= safeRadius) {
+      const centerRatio = 1 - Math.min(centerDistance / safeRadius, 1);
+      magnitude += centerRatio * EDGE_CENTER_EXPANSION;
+    }
 
-        if (forceStraight) {
-            cleanupScratch();
-            return;
-        }
+    magnitude = Math.max(EDGE_MIN_CURVE_MAGNITUDE, magnitude);
 
-        let magnitude = EDGE_BASE_CURVE_DISTANCE;
-        magnitude += spreadMagnitude * (EDGE_CURVE_SPACING * 0.6);
-        magnitude += Math.abs(combinedOffset) * (EDGE_CURVE_SPACING * 0.4);
-        magnitude += Math.abs(pairSpread) * (EDGE_CURVE_SPACING * 1.1);
-        magnitude += labelWidth * EDGE_LABEL_WIDTH_SCALE;
+    let distance = directionSign * magnitude;
 
-        if (labelRatio > 0.85) {
-            magnitude += (labelRatio - 0.85) * EDGE_CURVE_SPACING * 2.1;
-        }
+    if (distance === 0) {
+      distance = directionSign >= 0 ? EDGE_MIN_CURVE_MAGNITUDE : -EDGE_MIN_CURVE_MAGNITUDE;
+    }
 
-        if (spanLength > EDGE_CURVE_LENGTH_BASE) {
-            magnitude += ((spanLength - EDGE_CURVE_LENGTH_BASE) / EDGE_CURVE_LENGTH_SCALE) * EDGE_CURVE_SPACING;
-        }
+    const weightBase = (outSpread - inSpread) * EDGE_WEIGHT_SHIFT;
+    const pairBias = normalizedPairSpread * 0.18;
+    const outwardBias = directionSign * 0.08;
+    const labelBias = Math.max(-0.15, Math.min(0.15, (labelRatio - 1) * 0.12));
+    const weight = Math.max(0.12, Math.min(0.88, 0.5 + weightBase + outwardBias + pairBias + labelBias));
 
-        if (spanLength < labelWidth * 0.9) {
-            magnitude += (labelWidth * 0.9 - spanLength) * 0.9;
-        }
+    edge.data('controlPointDistance', distance);
+    edge.data('controlPointWeight', weight);
 
-        if (centerDistance <= safeRadius) {
-            const centerRatio = 1 - Math.min(centerDistance / safeRadius, 1);
-            magnitude += centerRatio * EDGE_CENTER_EXPANSION;
-        }
-
-        magnitude = Math.max(EDGE_MIN_CURVE_MAGNITUDE, magnitude);
-
-        let distance = directionSign * magnitude;
-
-        if (distance === 0) {
-            distance = directionSign >= 0 ? EDGE_MIN_CURVE_MAGNITUDE : -EDGE_MIN_CURVE_MAGNITUDE;
-        }
-
-        const weightBase = (outSpread - inSpread) * EDGE_WEIGHT_SHIFT;
-        const pairBias = normalizedPairSpread * 0.18;
-        const outwardBias = directionSign * 0.08;
-        const labelBias = Math.max(-0.15, Math.min(0.15, (labelRatio - 1) * 0.12));
-        const weight = Math.max(0.12, Math.min(0.88, 0.5 + weightBase + outwardBias + pairBias + labelBias));
-
-        edge.data('controlPointDistance', distance);
-        edge.data('controlPointWeight', weight);
-
-        cleanupScratch();
-    });
+    cleanupScratch();
+  });
 }
+
 
 
 //SCALING WORKING
@@ -724,81 +717,83 @@ function alignLayers(svgLayer, sfgLayer) {
 }
 
 
-
 function renderOverlay(data, curr_elements) {
-    const svgLayer = document.getElementById('svg-layer');
-    svgLayer.innerHTML = data.svg; 
+  const svgLayer = document.getElementById('svg-layer');
+  const sfgLayer = document.getElementById('sfg-layer');
 
-    // viewbox
-    const svgElement = svgLayer.querySelector('svg');
-    if (svgElement) {
-        const boundingBox = svgElement.getBBox(); 
-        const viewBoxValue = `${boundingBox.x} ${boundingBox.y} ${boundingBox.width} ${boundingBox.height}`;
-        svgElement.setAttribute('viewBox', viewBoxValue); 
-        console.log("Dynamic viewBox added:", viewBoxValue);
+  // ----- SVG layer -----
+  svgLayer.innerHTML = data.svg;
+
+  const svgElement = svgLayer.querySelector('svg');
+  if (svgElement) {
+    const boundingBox = svgElement.getBBox();
+    const viewBoxValue =
+      `${boundingBox.x} ${boundingBox.y} ${boundingBox.width} ${boundingBox.height}`;
+    svgElement.setAttribute('viewBox', viewBoxValue);
+  }
+
+  // ----- SFG overlay (fresh Cytoscape instance) -----
+  // Use the same elements as the main SFG so IDs/structure match
+  const overlayElements = curr_elements
+    ? JSON.parse(JSON.stringify(curr_elements))
+    : edge_helper(data, symbolic_flag);
+
+  // Destroy a previous overlay instance if it exists
+  if (window.overlayCy && typeof window.overlayCy.destroy === 'function') {
+    window.overlayCy.destroy();
+  }
+
+  const overlayCy = window.overlayCy = createSfgInstance(sfgLayer, overlayElements);
+
+  setupEdgeCurveCurvature(overlayCy);
+
+  // Straighten edges exactly like make_sfg
+  overlayCy.edges().forEach((edge) => {
+    if (
+      (edge.sourceEndpoint().x === edge.targetEndpoint().x ||
+       edge.sourceEndpoint().y === edge.targetEndpoint().y) &&
+      edge.source().edgesWith(edge.target()).length === 1
+    ) {
+      edge.data('controlPointDistance', 0);
+      edge.data('controlPointWeight', 0.5);
     }
+  });
 
-    const sfgLayer = document.getElementById('sfg-layer');
-    const cy = cytoscape({
-        container: sfgLayer,
-        elements: curr_elements, 
-        layout: {
-            name: 'dagre',
-            nodeSep: 200,
-            edgeSep: 220,
-            rankSep: 120,
-            rankDir: 'LR'
-        },
-        style: [
-            {
-                selector: 'node',
-                style: {
-                    'background-color': '#5aa5ff',
-                    'width': '84px',
-                    'height': '84px',
-                    'border-width': '4px',
-                    'border-color': '#4a90e2',
-                    'background-fill': 'radial-gradient',
-                    'background-gradient-stop-colors': '#ffffff #5aa5ff',
-                    'background-gradient-stop-positions': '0% 100%',
-                    'shadow-blur': 18,
-                    'shadow-color': '#2d5aa0',
-                    'shadow-opacity': 0.25,
-                    'shadow-offset-x': 0,
-                    'shadow-offset-y': 4,
-                    'label': 'data(name)',
-                    'font-size': '26px',
-                    'text-outline-width': '8',
-                    'text-outline-color': '#E8E8E8',
-                    'text-valign': 'center',
-                    'text-halign': 'center'
-                }
-            },
-            {
-                selector: 'edge',
-                style: {
-                    'width': 5,
-                    'line-color': '#4a90e2',
-                    'target-arrow-shape': 'triangle',
-                    'arrow-scale': 1.2,
-                    'target-arrow-color': '#4a90e2',
-                    'source-arrow-color': '#4a90e2',
-                    'curve-style': 'unbundled-bezier',
-                    'control-point-distance': 'data(controlPointDistance)',
-                    'control-point-weight': 'data(controlPointWeight)',
-                    'control-point-step-size': EDGE_CURVE_SPACING,
-                    'text-margin-y': 'data(labelOffset)'
-                }
-            }
-        ]
-    });
+  overlayCy.ready(() => {
+    overlayCy.resize();
+    overlayCy.fit();
 
+    // Align the SVG to the overlay SFG container
     alignLayers(svgLayer, sfgLayer);
 
-    setupEdgeCurveCurvature(cy);
+    // Run your auto-placement on the OVERLAY instance
+    try {
+      const oldCy = window.cy;
+      window.cy = overlayCy;   // make existing helpers operate on overlay
+      autoRelocateIVNodesPrefix({
+        animate: false,
+        iscOffsetPx: 18,
+      });
+      window.cy = oldCy;
+    } catch (e) {
+      console.warn('Auto placement failed in overlay:', e);
+    }
 
-
+    // Now copy node positions from overlay → main SFG
+    try {
+      if (window.cy) {
+        syncOverlayPositionsToMain(overlayCy, window.cy);
+        scheduleEdgeCurveUpdate(window.cy);
+      } else {
+        console.warn('Main window.cy not ready when syncing overlay positions');
+      }
+    } catch (e) {
+      console.warn('Failed to sync overlay positions to main SFG:', e);
+    }
+  });
 }
+
+
 
 
 let isSVGVisible = true; 
@@ -2057,22 +2052,34 @@ function editBranch() {
 function  display_mag_sfg() {
     let cy = window.cy;
 
-    let updates = new Array(cy.edges().length);
-    let poppers = new Array(cy.edges().length);
+    let updates = new Array(cy.edges().length)
+    let edges = new Array(cy.edges().length)
 
-    cy.edges().forEach((edge, idx) => {
-        const labelId = `edge-label-${edge.id()}`;
+    cy.edges().forEach((edge,idx) => {
+        
+        // print each edge
+        // console.log('Edge:', edge);
+        // console.log('Edges[idx]: ', edges[idx]);
 
-        poppers[idx] = edge.popper({
+        edges[idx] = edge.popper({
             content: () => {
-                let div = document.createElement('div');
-                div.id = labelId;
-                div.classList.add('label');
-                div.style.cssText = `font-size:${cy.zoom() * SYMBOLIC_LABEL_BASE_FONT + 'px'};font-weight:400;`;
-                div.style.marginTop = `${edge.data('labelOffset') || 0}px`;
-                div.innerHTML = '$$' + (edge_symbolic_label[idx] || '') + '$$';
-                document.getElementsByClassName('sfg-section')[0].appendChild(div);
-                return div;
+            let div = document.createElement('div');
+
+            //div.classList.add('popper-div');
+            div.id = 'edge-' + idx;
+            div.style.cssText = `font-size:${cy.zoom()*16 + 'px'};font-weight:400;`
+            
+            div.classList.add('label')
+        
+            div.innerHTML = '$$' + edge_symbolic_label[idx] + '$$';
+            //div.innerHTML = '$$\\frac{y}{2x} + C$$';
+
+
+        
+            //document.getElementById('magnitudes').appendChild(div);
+            //document.body.appendChild(div);
+            document.getElementsByClassName('sfg-section')[0].appendChild(div);
+            return div;
             },
             popper: {
                 modifiers: {
@@ -2081,119 +2088,32 @@ function  display_mag_sfg() {
                         boundariesElement: document.getElementsByClassName('sfg-section')[0],
                         padding: 5
                     },
-                    hide: {
+                    hide:  {
                         enabled: true,
                     }
-                }
             }
-        });
+        }})
 
-        const updateFn = () => {
-            poppers[idx].update();
-            const labelEl = document.getElementById(labelId);
-
-            if (labelEl) {
-                labelEl.style.fontSize = cy.zoom() * SYMBOLIC_LABEL_BASE_FONT + 'px';
-                labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
-
-                const rect = labelEl.getBoundingClientRect();
-
-                if (rect.width && rect.height) {
-                    edge.scratch('_labelWidthPx', rect.width);
-                    edge.scratch('_labelHeightPx', rect.height);
-                }
+        updates[idx] = () => {
+            edges[idx].update();
+            edge = document.querySelector(`#edge-${idx}`);
+            if (edge) {
+                edge.style.fontSize = cy.zoom()*16 + 'px';
             }
-
-            scheduleEdgeCurveUpdate(cy);
-        };
-
-        updates[idx] = updateFn;
-
-        edge.connectedNodes().on('position', updateFn);
-        cy.on('pan zoom resize', updateFn);
+        }
+          
+        edge.connectedNodes().on('position', updates[idx]);
+        
+        cy.on('pan zoom resize', updates[idx]);
+    
     });
 
-    scheduleEdgeCurveUpdate(cy);
-
-    const typesetPromise = MathJax.typesetPromise
-        ? MathJax.typesetPromise()
-        : new Promise(resolve => {
-            if (typeof MathJax.typeset === 'function') {
-                MathJax.typeset();
-            }
-            resolve();
-        });
-
-    typesetPromise.then(() => {
-        cy.edges().forEach(edge => {
-            const labelEl = document.getElementById(`edge-label-${edge.id()}`);
-
-            if (labelEl) {
-                const rect = labelEl.getBoundingClientRect();
-
-                if (rect.width && rect.height) {
-                    edge.scratch('_labelWidthPx', rect.width);
-                    edge.scratch('_labelHeightPx', rect.height);
-                }
-
-                labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
-            }
-        });
-
-        scheduleEdgeCurveUpdate(cy);
-    });
-
+    MathJax.typeset();
+    
     cy.style().selector('edge').css({'content': ''}).update()
     const time2 = new Date()
     let time_elapse = (time2 - time1)/1000
     console.log("display_mag_sfg SFG loading time: " + time_elapse + " seconds")
-}
-
-function updateSymbolicModeUI() {
-    const frequencySlider = document.getElementById("frequency-slider");
-    if (frequencySlider) {
-        frequencySlider.disabled = symbolic_flag;
-    }
-
-    const removeBranchButton = document.getElementById("rmv-branch-btn");
-    if (removeBranchButton) {
-        removeBranchButton.disabled = !symbolic_flag;
-    }
-
-    const editBranchButton = document.getElementById("edit-branch-btn");
-    if (editBranchButton) {
-        editBranchButton.disabled = !symbolic_flag;
-    }
-
-    const symbolicToggle = document.getElementById("feature-toggle");
-    if (symbolicToggle) {
-        symbolicToggle.checked = symbolic_flag;
-    }
-
-    const toggleStartTime = new Date();
-
-    const symbolic_labels = document.querySelectorAll('.label');
-    symbolic_labels.forEach(label => {
-        label.remove();
-    });
-
-    if (window.cy) {
-        if (symbolic_flag) {
-            display_mag_sfg();
-        } else {
-            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
-            window.cy.edges().forEach(edge => {
-                edge.removeScratch('_labelWidthPx');
-                edge.removeScratch('_labelHeightPx');
-                edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
-            });
-            scheduleEdgeCurveUpdate(window.cy);
-        }
-    }
-
-    const toggleEndTime = new Date();
-    let time_elapse = (toggleEndTime - toggleStartTime)/1000;
-    console.log("SFG loading time (symbolic and magnitude toggle): " + time_elapse + " seconds");
 }
 
 // declare global array of keys
@@ -2420,7 +2340,6 @@ function render_frontend(data) {
     let curr_elements = edge_helper(data, symbolic_flag)
     // load SFG panel
     make_sfg(curr_elements)
-    updateSymbolicModeUI()
     // load parameter panel
     make_parameter_panel(data.parameters)
     // load schematic panel
@@ -2452,7 +2371,6 @@ function update_frontend(data) {
     let curr_elements = edge_helper(data, symbolic_flag)
     // load SFG panel
     make_sfg(curr_elements)
-    updateSymbolicModeUI()
     // load parameter panel
     make_parameter_panel(data.parameters)
 }
@@ -2463,10 +2381,48 @@ document.addEventListener('DOMContentLoaded', load_interface);
 
 async function sfg_toggle() {
     symbolic_flag = !symbolic_flag
+    //document.getElementById("frequency-slider").disabled = !document.getElementById("frequency-slider").disabled
     try {
-        updateSymbolicModeUI()
-    } catch (error) {
-        console.error(error)
+        // Disable frequency slider on symbolic
+        if (!symbolic_flag) {
+            document.getElementById("frequency-slider").disabled = false;
+            document.getElementById("rmv-branch-btn").disabled = true;
+            document.getElementById("edit-branch-btn").disabled = true;
+        }
+        else {
+            document.getElementById("frequency-slider").disabled = true;
+            document.getElementById("rmv-branch-btn").disabled = false;
+            document.getElementById("edit-branch-btn").disabled = false;
+        }
+
+        // let url = new URL(`${baseUrl}/circuits/${circuitId}`)
+        // const response = await fetch(url)
+        // let data = await response.json()
+
+        //remove existing magnitude labels
+
+        const time1 = new Date()
+    
+
+        const symbolic_labels = document.querySelectorAll('.label');
+        symbolic_labels.forEach(label => {
+            label.remove();
+        });
+
+        if(symbolic_flag) {
+            display_mag_sfg();
+        }
+        else {
+            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
+        }
+
+        const time2 = new Date()
+
+        let time_elapse = (time2 - time1)/1000
+        console.log("SFG loading time (symbolic and magnitude toggle): " + time_elapse + " seconds")
+        
+        
+    } catch {
         alert("error when toggle sfg")
     }
 }
@@ -4696,4 +4652,478 @@ function validateNode(nodeId) {
     const cy = window.cy; // Cytoscape instance
     const existingNodes = cy.nodes().map(node => node.id()); // Get all node IDs
     return existingNodes.includes(nodeId); // Check if the node exists
+}
+
+/* ==========================================================
+   SFG↔SVG overlay: accurate markers + relocation + solid reset
+   (recomputes live SFG positions; ensures SVG has a viewBox)
+   ========================================================== */
+(function () {
+  const STATE_KEY = '__sfgSvgTools__';
+
+  function state() {
+    if (!window[STATE_KEY]) {
+      window[STATE_KEY] = {
+        savedPositions: null,   // { id: {x,y} }
+        savedPan: null,         // {x,y}
+        savedZoom: null,        // number
+        markerLayer: null
+      };
+    }
+    return window[STATE_KEY];
+  }
+
+  // ---------------- DOM / overlay ----------------
+  function byId(id){ return document.getElementById(id); }
+  function getOverlaySvg(){
+    const l = byId('svg-layer');
+    return l ? l.querySelector('svg') : null;
+  }
+
+  // If the cloned SVG is missing a viewBox, compute one from its bbox.
+  function ensureSvgViewBox(svg) {
+    if (!svg) return;
+    if (svg.hasAttribute('viewBox')) return;
+    try {
+      const b = svg.getBBox();
+      if (!isFinite(b.x) || !isFinite(b.y) || !isFinite(b.width) || !isFinite(b.height)) return;
+      svg.setAttribute('viewBox', `${b.x} ${b.y} ${Math.max(b.width,1)} ${Math.max(b.height,1)}`);
+    } catch (_) {
+      // Some SVGs may not support getBBox on the root; best effort only.
+    }
+    // Preserve aspect ratio to match most schematics
+    if (!svg.hasAttribute('preserveAspectRatio')) {
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    }
+    // Always stretch to container
+    svg.removeAttribute('width'); svg.removeAttribute('height');
+    svg.style.width = '100%'; svg.style.height = '100%';
+  }
+
+  function prepareOverlay() {
+    const overlay = byId('overlay-container');
+    const svgLayer = byId('svg-layer');
+    const sfgLayer = byId('sfg-layer');
+    if (!overlay || !svgLayer || !sfgLayer) {
+      console.warn('[overlay] Missing #overlay-container/#svg-layer/#sfg-layer');
+      return false;
+    }
+    overlay.style.position = 'relative';
+    overlay.style.overflow = 'hidden';
+    if ((parseFloat(getComputedStyle(overlay).height) || 0) < 300) {
+      overlay.style.height = '600px';
+    }
+    [svgLayer, sfgLayer].forEach(el => {
+      el.style.position = 'absolute';
+      el.style.top = el.style.left = el.style.right = el.style.bottom = '0';
+    });
+
+    // If svg-layer is empty, clone a schematic SVG into it
+    if (!svgLayer.querySelector('svg')) {
+      const host = document.querySelector('#circuit-svg svg') ||
+                   document.querySelector('#circuit-svg-small svg');
+      if (host) {
+        const clone = host.cloneNode(true);
+        svgLayer.innerHTML = '';
+        svgLayer.appendChild(clone);
+      }
+    }
+
+    // normalize SVG sizing
+    const svg = getOverlaySvg();
+    if (svg) ensureSvgViewBox(svg);
+
+    // Mount Cytoscape into #sfg-layer if needed
+    if (window.cy && typeof window.cy.mount === 'function') {
+      try { window.cy.mount(sfgLayer); } catch (e) { /* ignore */ }
+    }
+    return true;
+  }
+
+  // ---------------- coordinate helpers ----------------
+  function svgToClientFactory(svg){
+    return function(x,y){
+      const pt = svg.createSVGPoint(); pt.x=x; pt.y=y;
+      const m = svg.getScreenCTM(); if (!m) return null;
+      const p = pt.matrixTransform(m);
+      return { x: Math.round(p.x), y: Math.round(p.y) };
+    };
+  }
+
+  // Convert viewport/client px → Cytoscape model coords (so node lands at that pixel)
+  function clientToModel(xc, yc){
+    const cy = window.cy;
+    const rect = cy.container().getBoundingClientRect();
+    const z = cy.zoom(), pan = cy.pan();
+    return { x: (xc - rect.left - pan.x)/z, y: (yc - rect.top - pan.y)/z };
+  }
+
+  // Live SFG client center for a node id (fresh each time)
+  function sfgClientFor(id){
+    const cy = window.cy;
+    const rect = cy.container().getBoundingClientRect();
+    const coll = cy.$id(id);
+    if (!coll || !coll.length) return { x:null, y:null };
+    const r = coll.renderedPosition();
+    return { x: Math.round(rect.left + r.x), y: Math.round(rect.top + r.y) };
+  }
+
+  // Center of an SVG <text> by label (case-insensitive) → client px
+  function svgClientForLabel(label){
+    const svg = getOverlaySvg(); if (!svg) return { x:null, y:null };
+    const toClient = svgToClientFactory(svg);
+    const needle = String(label||'').trim().toLowerCase();
+    const texts = svg.querySelectorAll('text');
+    for (let i=0;i<texts.length;i++){
+      const t = (texts[i].textContent || '').trim().toLowerCase();
+      if (t === needle) {
+        try {
+          const b = texts[i].getBBox();
+          const c = toClient(b.x + b.width/2, b.y + b.height/2);
+          if (c) return { x:c.x, y:c.y };
+        } catch (_){}
+      }
+    }
+    return { x:null, y:null };
+  }
+
+  // ---------------- mapping / rows ----------------
+  const DEFAULT_NAME_MAP = {
+    Vvin:'vin', Vvout:'vout', Vvd1:'vd1', Vvs1:'vs1', Vn_vdd:'n_VDD', I1:'I1'
+  };
+  function normalizeMap(m){ // lowercases only for lookup; we preserve original case in labels
+    const o={}; Object.keys(m||{}).forEach(k=>{ o[k]=m[k]; }); return o;
+  }
+
+  // Build fresh rows every call (no stale coordinates)
+  // returns [{ id, svg_label, matched, sfg_client_x, sfg_client_y, svg_client_x, svg_client_y }]
+  function mapSfgToSvgByText(overrides){
+    if (!prepareOverlay() || !window.cy) return [];
+    const MAP = normalizeMap(Object.assign({}, DEFAULT_NAME_MAP, overrides||{}));
+    const rows = [];
+    window.cy.nodes().forEach(n=>{
+      const id = n.id();
+      const label = MAP[id] || id;                  // fallback try
+      const sfg = sfgClientFor(id);                 // LIVE SFG position
+      const svg = svgClientForLabel(label);
+      rows.push({
+        id,
+        svg_label: label,
+        matched: Number.isFinite(svg.x) && Number.isFinite(svg.y),
+        sfg_client_x: sfg.x, sfg_client_y: sfg.y,
+        svg_client_x: svg.x, svg_client_y: svg.y
+      });
+    });
+    return rows;
+  }
+
+  // ---------------- markers (always recomputed) ----------------
+  function clearMarkers(){
+    const st = state();
+    if (st.markerLayer) { st.markerLayer.remove(); st.markerLayer = null; }
+  }
+
+  function drawSfgSvgMarkers(rows){
+    // recompute SFG positions to avoid drift after moves
+    const fresh = (rows || []).map(r=>{
+      const sfg = sfgClientFor(r.id);
+      return Object.assign({}, r, { sfg_client_x: sfg.x, sfg_client_y: sfg.y });
+    });
+
+    const overlay = byId('overlay-container');
+    if (!overlay) { console.warn('no #overlay-container'); return; }
+    clearMarkers();
+
+    const layer = document.createElement('div');
+    Object.assign(layer.style, { position:'absolute', inset:'0', pointerEvents:'none', zIndex: 999999 });
+    overlay.appendChild(layer);
+    state().markerLayer = layer;
+
+    function dot(x,y,color){ if(x==null||y==null) return;
+      const d=document.createElement('div');
+      Object.assign(d.style,{position:'absolute',left:(x-4)+'px',top:(y-4)+'px',width:'8px',height:'8px',borderRadius:'50%',background:color,outline:'1px solid #000'});
+      layer.appendChild(d);
+    }
+    function label(x,y,text,color){ if(x==null||y==null) return;
+      const t=document.createElement('div');
+      Object.assign(t.style,{position:'absolute',left:(x+6)+'px',top:(y-6)+'px',font:'11px/1.2 monospace',color});
+      t.textContent=text; layer.appendChild(t);
+    }
+
+    fresh.forEach(r=>{
+      // SFG now (blue)
+      dot(r.sfg_client_x, r.sfg_client_y, '#1e90ff');
+      label(r.sfg_client_x, r.sfg_client_y, r.id, '#1e90ff');
+
+      // SVG target (red)
+      if (r.matched) {
+        dot(r.svg_client_x, r.svg_client_y, '#e74c3c');
+        label(r.svg_client_x, r.svg_client_y, r.svg_label, '#e74c3c');
+      }
+    });
+
+    console.log('Markers drawn (blue=SFG id, red=SVG label).');
+  }
+
+  // ---------------- relocate & reset ----------------
+  function ensureSavedPositions(){
+    const st = state();
+    if (st.savedPositions) return; // already saved
+    if (!window.cy) return;
+    st.savedPositions = {};
+    window.cy.nodes().forEach(n => { st.savedPositions[n.id()] = { x:n.position('x'), y:n.position('y') }; });
+    st.savedPan  = Object.assign({}, window.cy.pan());
+    st.savedZoom = window.cy.zoom();
+  }
+
+  function relocateSfgNodesToSvg({ rows, animate = true, duration = 350 } = {}){
+    if (!window.cy) { console.warn('cy not ready'); return; }
+    if (!rows || !rows.length) { console.warn('relocate: pass rows from mapSfgToSvgByText()'); return; }
+    ensureSavedPositions();
+
+    const moved = [];
+    rows.forEach(r=>{
+      if (!r || !r.matched || r.svg_client_x==null || r.svg_client_y==null) return;
+      const coll = window.cy.$id(r.id);
+      if (!coll || !coll.length) return;
+      const model = clientToModel(r.svg_client_x, r.svg_client_y);
+      if (animate && typeof coll.animate === 'function') {
+        coll.animate({ position: model }, { duration });
+      } else {
+        coll.position(model);
+      }
+      moved.push({ id:r.id, to:model });
+    });
+
+    console.log(`Relocated ${moved.length} node(s).`, moved);
+  }
+
+  function resetSfgRelocation({ restoreView = true, animate = false, duration = 0 } = {}){
+    if (!window.cy) { console.warn('cy not ready'); return; }
+    const st = state();
+    if (!st.savedPositions) { console.warn('No saved positions to restore.'); return; }
+
+    const cy = window.cy;
+    Object.keys(st.savedPositions).forEach(id=>{
+      const coll = cy.$id(id);
+      if (!coll || !coll.length) return;
+      const pos = st.savedPositions[id];
+      if (animate && typeof coll.animate === 'function') {
+        coll.animate({ position: pos }, { duration });
+      } else {
+        coll.position(pos);
+      }
+    });
+
+    if (restoreView) {
+      if (typeof cy.zoom === 'function' && st.savedZoom != null) cy.zoom(st.savedZoom);
+      if (typeof cy.pan  === 'function' && st.savedPan)       cy.pan(st.savedPan);
+    }
+
+    st.savedPositions = null;
+    st.savedPan = null;
+    st.savedZoom = null;
+    clearMarkers();
+    console.log('SFG node positions (and view) restored.');
+  }
+
+  // ---------------- quick inspectors ----------------
+  function printOverlayNodeCoords() {
+    if (!window.cy) { console.warn('cy not ready'); return []; }
+    const rect = window.cy.container().getBoundingClientRect();
+    const rows = window.cy.nodes().map(n=>{
+      const m = n.position(), r = n.renderedPosition();
+      return { id:n.id(), model_x:m.x, model_y:m.y, client_x: Math.round(rect.left+r.x), client_y: Math.round(rect.top+r.y) };
+    });
+    console.table(rows);
+    return rows;
+  }
+
+  function printSvgIndex() {
+    const svg = getOverlaySvg();
+    if (!svg) { console.warn('No SVG found in #svg-layer'); return []; }
+    ensureSvgViewBox(svg); // normalize first
+    const toClient = svgToClientFactory(svg);
+    const out = [];
+    svg.querySelectorAll('*').forEach((el, i) => {
+      const tag   = el.tagName.toLowerCase();
+      const id    = el.id || '';
+      const klass = (el.getAttribute('class') || '').trim();
+      const text  = (tag === 'text') ? (el.textContent || '').trim() : '';
+      let bbStr = '', cx = null, cy = null;
+      try {
+        const bb = el.getBBox();
+        bbStr = `${(+bb.width).toFixed(1)}×${(+bb.height).toFixed(1)}`;
+        const c = toClient(bb.x + bb.width/2, bb.y + bb.height/2);
+        if (c) { cx = c.x; cy = c.y; }
+      } catch (_) { /* some nodes have no bbox */ }
+      out.push({ i, tag, id, class: klass, text, bb: bbStr, cx, cy });
+    });
+    console.table(out);
+    return out;
+  }
+
+  // ---------------- exports ----------------
+  window.mapSfgToSvgByText     = window.mapSfgToSvgByText || mapSfgToSvgByText;
+  window.drawSfgSvgMarkers     = drawSfgSvgMarkers;
+  window.relocateSfgNodesToSvg = relocateSfgNodesToSvg;
+  window.resetSfgRelocation    = resetSfgRelocation;
+  window.printOverlayNodeCoords= window.printOverlayNodeCoords || printOverlayNodeCoords;
+  window.printSvgIndex         = window.printSvgIndex || printSvgIndex;
+
+  console.log('[SFG/SVG overlay: live markers + viewBox normalization ready]');
+})();
+
+/* ===== Fixed-coordinate labeled markers (exact viewport positions) ===== */
+(function(){
+  // Delete any prior markers (fixed-mode)
+  function clearFixedMarkers(){
+    document.querySelectorAll('.overlay-marker-fixed,.overlay-marker-label-fixed').forEach(n => n.remove());
+  }
+
+  // Live SFG client center for a node id
+  function _sfgClientFor(id){
+    if (!window.cy) return { x:null, y:null };
+    const rect = window.cy.container().getBoundingClientRect();
+    const coll = window.cy.$id(id);
+    if (!coll || !coll.length) return { x:null, y:null };
+    const r = coll.renderedPosition();
+    return { x: Math.round(rect.left + r.x), y: Math.round(rect.top + r.y) };
+  }
+
+  // Draw markers using position:fixed so client coords land exactly
+  function drawSfgSvgMarkersFixed(rows){
+    if (!rows || !rows.length) { console.warn('drawSfgSvgMarkersFixed: pass rows'); return; }
+
+    // Recompute SFG positions (avoid stale coords)
+    const fresh = rows.map(r => {
+      const s = _sfgClientFor(r.id);
+      return Object.assign({}, r, { sfg_client_x: s.x, sfg_client_y: s.y });
+    });
+
+    clearFixedMarkers();
+
+    function dot(x, y, color, title){
+      if (x == null || y == null) return;
+      const d = document.createElement('div');
+      d.className = 'overlay-marker-fixed';
+      Object.assign(d.style, {
+        position: 'fixed',
+        left: (x - 4) + 'px',
+        top:  (y - 4) + 'px',
+        width: '8px',
+        height:'8px',
+        borderRadius:'50%',
+        background: color,
+        outline: '1px solid #000',
+        zIndex: 2147483647
+      });
+      if (title) d.title = title;
+      document.body.appendChild(d);
+    }
+    function label(x, y, text, color){
+      if (x == null || y == null) return;
+      const t = document.createElement('div');
+      t.className = 'overlay-marker-label-fixed';
+      Object.assign(t.style, {
+        position: 'fixed',
+        left: (x + 6) + 'px',
+        top:  (y - 6) + 'px',
+        font: '11px/1.2 monospace',
+        color: color,
+        pointerEvents: 'none',
+        zIndex: 2147483647
+      });
+      t.textContent = text;
+      document.body.appendChild(t);
+    }
+
+    // Blue = SFG node id; Red = SVG label
+    fresh.forEach(r => {
+      dot(r.sfg_client_x, r.sfg_client_y, '#1e90ff', `SFG ${r.id}`);
+      label(r.sfg_client_x, r.sfg_client_y, r.id, '#1e90ff');
+
+      if (r.matched) {
+        dot(r.svg_client_x, r.svg_client_y, '#e74c3c', `SVG ${r.svg_label}`);
+        label(r.svg_client_x, r.svg_client_y, r.svg_label, '#e74c3c');
+      }
+    });
+
+    console.log('Markers (fixed) drawn: blue=SFG, red=SVG.');
+  }
+
+  // Expose: keep your old name as a wrapper so existing calls work
+  window.drawSfgSvgMarkersFixed = drawSfgSvgMarkersFixed;
+  window.drawSfgSvgMarkers = drawSfgSvgMarkersFixed; // override previous implementation
+  window.clearSfgSvgMarkers = clearFixedMarkers;
+})();
+
+
+// ---------- Dynamic mapping for prefix style: Iscvin, Vvin, Iscn_vdd, Vn_vdd ----------
+
+// Build overrides like:
+//  "Iscvin"   -> "vin"
+//  "Vvin"     -> "vin"
+//  "Iscn_vdd" -> "n_vdd"
+//  "Vn_vdd"   -> "n_vdd"
+// If the id doesn't start with V or Isc (e.g. "I1"), we don't override it at all,
+// so it maps to the point itself.
+function buildPrefixNameOverrides() {
+  const overrides = {};
+  if (!window.cy) return overrides;
+
+  window.cy.nodes().forEach(n => {
+    const id = n.id();
+    let base = null;
+
+    // Handle Isc prefix
+    if (/^Isc/i.test(id)) {
+      base = id.slice(3);  // remove "Isc"
+    }
+    // Handle V prefix (but not "Isc" which already matched)
+    else if (/^V/.test(id)) {
+      base = id.slice(1);  // remove leading "V"
+    }
+
+    // If it didn't start with Isc or V, we don't touch it
+    if (!base) return;
+
+    // Clean up leading separators like "_", "-", or spaces
+    base = base.replace(/^[_\-\s]+/, '');
+
+    // Only set an override if there's something left
+    if (base) {
+      overrides[id] = base;
+    }
+  });
+
+  return overrides;
+}
+
+// Main entrypoint: map & relocate, with Isc nodes shifted left of the point.
+function autoRelocateIVNodesPrefix({
+  animate = true,
+  duration = 350,
+  iscOffsetPx = 18   // how far left of the SVG label Isc nodes sit
+} = {}) {
+  // 1) Build overrides so Isc*/V* map to their base point label
+  const overrides = buildPrefixNameOverrides();
+
+  // 2) Use your existing mapping helper
+  const rows = mapSfgToSvgByText(overrides);
+
+  // 3) Shift Isc nodes a bit to the left of the SVG point
+  rows.forEach(r => {
+    if (!r || !r.matched || r.svg_client_x == null) return;
+
+    // Depending on how your row is structured, adjust this if needed
+    const nodeId = r.id || r.sfg_id || (r.node && r.node.id && r.node.id()) || "";
+
+    if (/^Isc/i.test(nodeId)) {
+      r.svg_client_x -= iscOffsetPx;
+    }
+  });
+
+  // 4) Move the nodes
+  relocateSfgNodesToSvg({ rows, animate, duration });
 }
