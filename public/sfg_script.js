@@ -110,6 +110,108 @@ function syncSymbolicLabelOffsets(cy) {
     });
 }
 
+function applyEdgeLabelVisibility(cyInstance = window.cy) {
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    const edgeStyle = cyInstance.style().selector('edge');
+
+    if (!symbolic_flag) {
+        edgeStyle.css({'content': edgeLabelsVisible ? 'data(weight)' : ''}).update();
+        return;
+    }
+
+    edgeStyle.css({'content': ''}).update();
+    const container = document.querySelector('.sfg-section');
+    if (!container) {
+        return;
+    }
+
+    const symbolicLabels = container.querySelectorAll('.label');
+    symbolicLabels.forEach(label => {
+        label.style.display = edgeLabelsVisible ? '' : 'none';
+    });
+}
+
+function toggleEdgeLabels() {
+    edgeLabelsVisible = !edgeLabelsVisible;
+    applyEdgeLabelVisibility(window.cy);
+}
+
+function removeSymbolicLabels() {
+    const container = document.querySelector('.sfg-section');
+    if (!container) {
+        return;
+    }
+
+    container.querySelectorAll('.label').forEach(label => {
+        label.remove();
+    });
+}
+
+function renderSymbolicLabels() {
+    if (!symbolic_flag) {
+        removeSymbolicLabels();
+        return;
+    }
+
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    removeSymbolicLabels();
+    display_mag_sfg();
+}
+
+function renderNumericLabels() {
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        removeSymbolicLabels();
+        return;
+    }
+
+    removeSymbolicLabels();
+    applyEdgeLabelVisibility(cyInstance);
+}
+
+function renderCurrentLabelMode() {
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    if (symbolic_flag) {
+        renderSymbolicLabels();
+    } else {
+        renderNumericLabels();
+    }
+}
+
+function updateSymbolicUIState() {
+    const frequencySlider = document.getElementById('frequency-slider');
+    const removeBtn = document.getElementById('rmv-branch-btn');
+    const editBtn = document.getElementById('edit-branch-btn');
+    const toggle = document.getElementById('feature-toggle');
+
+    if (frequencySlider) {
+        frequencySlider.disabled = symbolic_flag;
+    }
+
+    if (removeBtn) {
+        removeBtn.disabled = !symbolic_flag;
+    }
+
+    if (editBtn) {
+        editBtn.disabled = !symbolic_flag;
+    }
+
+    if (toggle) {
+        toggle.checked = symbolic_flag;
+    }
+}
+
 let stack_len = 0
 let redo_len = 0
 
@@ -117,7 +219,7 @@ if (!circuitId) {
     window.location.replace('./landing.html');
 }
 
-var symbolic_flag = false //feature toggle
+var symbolic_flag = true //feature toggle
 var tf_flag = false //transfer function toggle
 var lg_flag = false //loop gain toggle
 var tf = {}
@@ -125,6 +227,7 @@ let current_data = null //session data
 let edge_symbolic_label;
 let transfer_bode_plot_history = [];
 let loop_gain_bode_plot_history = [];
+let edgeLabelsVisible = true;
 
 // Function to convert float to exponential
 function expo(x, f) {
@@ -326,28 +429,6 @@ function createSfgInstance(container, elements, extraOptions = {}) {
   }, extraOptions));
 }
 
-// Keep a handle to the overlay instance
-let overlayCy = null;
-
-// Copy node positions from overlay to main, so placements match
-function syncOverlayPositionsToMain(overlay, main) {
-  if (!overlay || !main) return;
-
-  const overlayPositions = {};
-  overlay.nodes().forEach(n => {
-    overlayPositions[n.id()] = n.position();
-  });
-
-  main.nodes().forEach(n => {
-    const pos = overlayPositions[n.id()];
-    if (pos) {
-      n.position(pos);
-    }
-  });
-
-  main.fit();  // adjust zoom in sfg-section so everything is visible
-}
-
 function make_sfg(elements) {
   const container = document.getElementById('cy');
   if (!container) {
@@ -426,6 +507,8 @@ function make_sfg(elements) {
 
   // Initialize edge hover functionality
   initializeEdgeHover();
+
+  renderCurrentLabelMode();
 
   const time2 = new Date();
   let time_elapse = (time2 - time1)/1000;
@@ -702,6 +785,10 @@ function alignLayers(svgLayer, sfgLayer) {
     const svgBounds = svgLayer.getBoundingClientRect();
     const sfgBounds = sfgLayer.getBoundingClientRect();
 
+    if (!svgBounds.width || !svgBounds.height) {
+        return;
+    }
+
     const scaleX = sfgBounds.width / svgBounds.width;
     const scaleY = sfgBounds.height / svgBounds.height;
     const offsetX = sfgBounds.left - svgBounds.left;
@@ -711,17 +798,21 @@ function alignLayers(svgLayer, sfgLayer) {
     svgLayer.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scaleX}, ${scaleY})`;
 
     svgLayer.style.opacity = 0.5;
-    sfgLayer.style.opacity = 0.8;
+    sfgLayer.style.opacity = 1;
 
     console.log("SVG aligned with SFG:", { scaleX, scaleY, offsetX, offsetY });
 }
 
 
-function renderOverlay(data, curr_elements) {
+function renderOverlay(data) {
   const svgLayer = document.getElementById('svg-layer');
-  const sfgLayer = document.getElementById('sfg-layer');
+  const sfgLayer = document.getElementById('cy');
 
-  // ----- SVG layer -----
+  if (!svgLayer || !sfgLayer) {
+    console.warn('renderOverlay: missing #svg-layer or #cy containers');
+    return;
+  }
+
   svgLayer.innerHTML = data.svg;
 
   const svgElement = svgLayer.querySelector('svg');
@@ -730,65 +821,23 @@ function renderOverlay(data, curr_elements) {
     const viewBoxValue =
       `${boundingBox.x} ${boundingBox.y} ${boundingBox.width} ${boundingBox.height}`;
     svgElement.setAttribute('viewBox', viewBoxValue);
+    svgElement.style.width = '100%';
+    svgElement.style.height = '100%';
   }
 
-  // ----- SFG overlay (fresh Cytoscape instance) -----
-  // Use the same elements as the main SFG so IDs/structure match
-  const overlayElements = curr_elements
-    ? JSON.parse(JSON.stringify(curr_elements))
-    : edge_helper(data, symbolic_flag);
-
-  // Destroy a previous overlay instance if it exists
-  if (window.overlayCy && typeof window.overlayCy.destroy === 'function') {
-    window.overlayCy.destroy();
-  }
-
-  const overlayCy = window.overlayCy = createSfgInstance(sfgLayer, overlayElements);
-
-  setupEdgeCurveCurvature(overlayCy);
-
-  // Straighten edges exactly like make_sfg
-  overlayCy.edges().forEach((edge) => {
-    if (
-      (edge.sourceEndpoint().x === edge.targetEndpoint().x ||
-       edge.sourceEndpoint().y === edge.targetEndpoint().y) &&
-      edge.source().edgesWith(edge.target()).length === 1
-    ) {
-      edge.data('controlPointDistance', 0);
-      edge.data('controlPointWeight', 0.5);
-    }
-  });
-
-  overlayCy.ready(() => {
-    overlayCy.resize();
-    overlayCy.fit();
-
-    // Align the SVG to the overlay SFG container
+  requestAnimationFrame(() => {
     alignLayers(svgLayer, sfgLayer);
 
-    // Run your auto-placement on the OVERLAY instance
-    try {
-      const oldCy = window.cy;
-      window.cy = overlayCy;   // make existing helpers operate on overlay
-      autoRelocateIVNodesPrefix({
-        animate: false,
-        iscOffsetPx: 18,
-      });
-      window.cy = oldCy;
-    } catch (e) {
-      console.warn('Auto placement failed in overlay:', e);
-    }
-
-    // Now copy node positions from overlay → main SFG
     try {
       if (window.cy) {
-        syncOverlayPositionsToMain(overlayCy, window.cy);
+        autoRelocateIVNodesPrefix({
+          animate: false,
+          iscOffsetPx: 18,
+        });
         scheduleEdgeCurveUpdate(window.cy);
-      } else {
-        console.warn('Main window.cy not ready when syncing overlay positions');
       }
     } catch (e) {
-      console.warn('Failed to sync overlay positions to main SFG:', e);
+      console.warn('Auto placement failed while syncing overlay:', e);
     }
   });
 }
@@ -2108,9 +2157,12 @@ function  display_mag_sfg() {
     
     });
 
-    MathJax.typeset();
-    
+    if (window.MathJax && typeof MathJax.typeset === 'function') {
+        MathJax.typeset();
+    }
+
     cy.style().selector('edge').css({'content': ''}).update()
+    applyEdgeLabelVisibility(cy);
     const time2 = new Date()
     let time_elapse = (time2 - time1)/1000
     console.log("display_mag_sfg SFG loading time: " + time_elapse + " seconds")
@@ -2362,7 +2414,7 @@ function render_frontend(data) {
     make_frequency_bounds()
 
     // Render the overlay
-    renderOverlay(data, curr_elements); 
+    renderOverlay(data);
 }
 
 
@@ -2381,20 +2433,8 @@ document.addEventListener('DOMContentLoaded', load_interface);
 
 async function sfg_toggle() {
     symbolic_flag = !symbolic_flag
-    //document.getElementById("frequency-slider").disabled = !document.getElementById("frequency-slider").disabled
+    updateSymbolicUIState();
     try {
-        // Disable frequency slider on symbolic
-        if (!symbolic_flag) {
-            document.getElementById("frequency-slider").disabled = false;
-            document.getElementById("rmv-branch-btn").disabled = true;
-            document.getElementById("edit-branch-btn").disabled = true;
-        }
-        else {
-            document.getElementById("frequency-slider").disabled = true;
-            document.getElementById("rmv-branch-btn").disabled = false;
-            document.getElementById("edit-branch-btn").disabled = false;
-        }
-
         // let url = new URL(`${baseUrl}/circuits/${circuitId}`)
         // const response = await fetch(url)
         // let data = await response.json()
@@ -2402,19 +2442,9 @@ async function sfg_toggle() {
         //remove existing magnitude labels
 
         const time1 = new Date()
-    
 
-        const symbolic_labels = document.querySelectorAll('.label');
-        symbolic_labels.forEach(label => {
-            label.remove();
-        });
 
-        if(symbolic_flag) {
-            display_mag_sfg();
-        }
-        else {
-            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
-        }
+        renderCurrentLabelMode();
 
         const time2 = new Date()
 
@@ -2445,6 +2475,8 @@ if (return_landing) {
         window.location.replace('./landing.html');
     })
 }
+
+updateSymbolicUIState();
 
 // HTML Frequency slider element
 let frequency_slider = document.getElementById("frequency-slider");
@@ -4206,12 +4238,7 @@ function sfg_redo(){
 
 function reset_mag_labels(){
     if(symbolic_flag) {
-        const symbolic_labels = document.querySelectorAll('.label');
-        symbolic_labels.forEach(label => {
-            label.remove();
-        });
-
-        display_mag_sfg();
+        renderSymbolicLabels();
     }
 }
 
@@ -4703,9 +4730,9 @@ function validateNode(nodeId) {
   function prepareOverlay() {
     const overlay = byId('overlay-container');
     const svgLayer = byId('svg-layer');
-    const sfgLayer = byId('sfg-layer');
+    const sfgLayer = byId('cy');
     if (!overlay || !svgLayer || !sfgLayer) {
-      console.warn('[overlay] Missing #overlay-container/#svg-layer/#sfg-layer');
+      console.warn('[overlay] Missing #overlay-container/#svg-layer/#cy');
       return false;
     }
     overlay.style.position = 'relative';
@@ -4713,7 +4740,7 @@ function validateNode(nodeId) {
     if ((parseFloat(getComputedStyle(overlay).height) || 0) < 300) {
       overlay.style.height = '600px';
     }
-    [svgLayer, sfgLayer].forEach(el => {
+    [svgLayer].forEach(el => {
       el.style.position = 'absolute';
       el.style.top = el.style.left = el.style.right = el.style.bottom = '0';
     });
@@ -4733,10 +4760,6 @@ function validateNode(nodeId) {
     const svg = getOverlaySvg();
     if (svg) ensureSvgViewBox(svg);
 
-    // Mount Cytoscape into #sfg-layer if needed
-    if (window.cy && typeof window.cy.mount === 'function') {
-      try { window.cy.mount(sfgLayer); } catch (e) { /* ignore */ }
-    }
     return true;
   }
 
