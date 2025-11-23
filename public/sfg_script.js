@@ -5,6 +5,213 @@ const circuitId = sessionStorage.getItem('circuitId');
 let [simplify_mode, node1, node2] = [false, null, null];
 let [highlight_mode, hlt_src, hlt_tgt] = [false, null, null];
 
+const SYMBOLIC_LABEL_BASE_FONT = 24;
+const EDGE_BASE_CURVE_DISTANCE = 220;
+const EDGE_CURVE_SPACING = 150;
+const EDGE_MIN_CURVE_MAGNITUDE = 130;
+const EDGE_WEIGHT_SHIFT = 0.22;
+const EDGE_CURVE_LENGTH_BASE = 260;
+const EDGE_CURVE_LENGTH_SCALE = 280;
+const EDGE_CENTER_EXPANSION = 340;
+const EDGE_LABEL_OFFSET_BASE = -18;
+const EDGE_LABEL_OFFSET_STEP = 26;
+const EDGE_LABEL_WIDTH_PADDING = 72;
+const EDGE_LABEL_CHAR_FACTOR = 0.62;
+const EDGE_LABEL_WIDTH_SCALE = 0.45;
+
+let pendingCurveUpdate = false;
+
+function scheduleEdgeCurveUpdate(cy) {
+    if (!cy || cy.destroyed()) {
+        return;
+    }
+
+    if (pendingCurveUpdate) {
+        return;
+    }
+
+    pendingCurveUpdate = true;
+
+    requestAnimationFrame(() => {
+        pendingCurveUpdate = false;
+        applyEdgeCurves(cy);
+        syncSymbolicLabelOffsets(cy);
+    });
+}
+
+function sanitizeLatexText(text) {
+    if (!text) {
+        return '';
+    }
+
+    return String(text)
+        .replace(/\\frac/g, 'frac')
+        .replace(/\\[a-zA-Z]+/g, 'A')
+        .replace(/[{}^_]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function approximateLabelWidth(text, fontSize) {
+    if (!text) {
+        return 0;
+    }
+
+    const normalized = text.trim();
+
+    if (!normalized) {
+        return 0;
+    }
+
+    const baseSize = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : SYMBOLIC_LABEL_BASE_FONT;
+    const length = normalized.length;
+
+    return length * baseSize * EDGE_LABEL_CHAR_FACTOR + EDGE_LABEL_WIDTH_PADDING;
+}
+
+function measureEdgeLabelWidth(edge) {
+    if (!edge || edge.destroyed()) {
+        return 0;
+    }
+
+    const measuredWidth = edge.scratch('_labelWidthPx');
+
+    if (measuredWidth && measuredWidth > 0) {
+        return measuredWidth + EDGE_LABEL_WIDTH_PADDING * 0.5;
+    }
+
+    const numericText = edge.data('weight') || '';
+    const numericFont = parseFloat(edge.style ? edge.style('font-size') : SYMBOLIC_LABEL_BASE_FONT) || SYMBOLIC_LABEL_BASE_FONT;
+    const numericWidth = approximateLabelWidth(String(numericText), numericFont);
+
+    const symbolicIndex = edge.data('symbolicIndex');
+    let symbolicText = '';
+
+    if (symbolicIndex !== undefined && symbolicIndex !== null && edge_symbolic_label && edge_symbolic_label[symbolicIndex]) {
+        symbolicText = sanitizeLatexText(edge_symbolic_label[symbolicIndex]);
+    }
+
+    const symbolicWidth = approximateLabelWidth(symbolicText, SYMBOLIC_LABEL_BASE_FONT * 1.05);
+
+    return Math.max(numericWidth, symbolicWidth);
+}
+
+function syncSymbolicLabelOffsets(cy) {
+    if (!symbolic_flag || !cy || cy.destroyed()) {
+        return;
+    }
+
+    cy.edges().forEach(edge => {
+        const labelEl = document.getElementById(`edge-label-${edge.id()}`);
+
+        if (labelEl) {
+            labelEl.style.marginTop = `${edge.data('labelOffset') || 0}px`;
+        }
+    });
+}
+
+function applyEdgeLabelVisibility(cyInstance = window.cy) {
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    const edgeStyle = cyInstance.style().selector('edge');
+
+    if (!symbolic_flag) {
+        edgeStyle.css({'content': edgeLabelsVisible ? 'data(weight)' : ''}).update();
+        return;
+    }
+
+    edgeStyle.css({'content': ''}).update();
+    const container = document.querySelector('.sfg-section');
+    if (!container) {
+        return;
+    }
+
+    const symbolicLabels = container.querySelectorAll('.label');
+    symbolicLabels.forEach(label => {
+        label.style.display = edgeLabelsVisible ? '' : 'none';
+    });
+}
+
+function toggleEdgeLabels() {
+    edgeLabelsVisible = !edgeLabelsVisible;
+    applyEdgeLabelVisibility(window.cy);
+}
+
+function removeSymbolicLabels() {
+    const container = document.querySelector('.sfg-section');
+    if (!container) {
+        return;
+    }
+
+    container.querySelectorAll('.label').forEach(label => {
+        label.remove();
+    });
+}
+
+function renderSymbolicLabels() {
+    if (!symbolic_flag) {
+        removeSymbolicLabels();
+        return;
+    }
+
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    removeSymbolicLabels();
+    display_mag_sfg();
+}
+
+function renderNumericLabels() {
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        removeSymbolicLabels();
+        return;
+    }
+
+    removeSymbolicLabels();
+    applyEdgeLabelVisibility(cyInstance);
+}
+
+function renderCurrentLabelMode() {
+    const cyInstance = window.cy;
+    if (!cyInstance || cyInstance.destroyed()) {
+        return;
+    }
+
+    if (symbolic_flag) {
+        renderSymbolicLabels();
+    } else {
+        renderNumericLabels();
+    }
+}
+
+function updateSymbolicUIState() {
+    const frequencySlider = document.getElementById('frequency-slider');
+    const removeBtn = document.getElementById('rmv-branch-btn');
+    const editBtn = document.getElementById('edit-branch-btn');
+    const toggle = document.getElementById('feature-toggle');
+
+    if (frequencySlider) {
+        frequencySlider.disabled = symbolic_flag;
+    }
+
+    if (removeBtn) {
+        removeBtn.disabled = !symbolic_flag;
+    }
+
+    if (editBtn) {
+        editBtn.disabled = !symbolic_flag;
+    }
+
+    if (toggle) {
+        toggle.checked = symbolic_flag;
+    }
+}
+
 let stack_len = 0
 let redo_len = 0
 
@@ -12,7 +219,7 @@ if (!circuitId) {
     window.location.replace('./landing.html');
 }
 
-var symbolic_flag = false //feature toggle
+var symbolic_flag = true //feature toggle
 var tf_flag = false //transfer function toggle
 var lg_flag = false //loop gain toggle
 var tf = {}
@@ -20,6 +227,7 @@ let current_data = null //session data
 let edge_symbolic_label;
 let transfer_bode_plot_history = [];
 let loop_gain_bode_plot_history = [];
+let edgeLabelsVisible = true;
 
 // Function to convert float to exponential
 function expo(x, f) {
@@ -61,6 +269,9 @@ function edge_helper(sample_data, flag) {
         // Transmittance in polar form
         let result = magnitude.concat("∠", phase);
         new_edge.data.weight = result
+        new_edge.data.controlPointDistance = -EDGE_BASE_CURVE_DISTANCE
+        new_edge.data.controlPointWeight = 0.5
+        new_edge.data.labelOffset = EDGE_LABEL_OFFSET_BASE
         sfg_edges.push(new_edge)
     }
 
@@ -71,244 +282,510 @@ function edge_helper(sample_data, flag) {
 // log sfg module loading time
 const time1 = new Date()
 
-function make_sfg(elements) {
-    var cy = window.cy = cytoscape({
-        container: document.getElementById('cy'),
 
-        layout: {
-            name: 'dagre',
-            nodeSep: 200,
-            edgeSep: 200,
-            rankSep: 100,
-            rankDir: 'LR',
-            fit: true,
-            minLen: function( edge ){ return 2 } 
-        },
-        wheelSensitivity: 0.4,
-        style: [
-        {
-            selector: 'node[name]',
-            style: {
-            'content': 'data(name)'
-            }
-        },
+// Shared SFG style so sfg-section and overlay-section look identical
+function getSfgStyles() {
+  return [
+    {
+      selector: 'node[name]',
+      style: {
+        'content': 'data(name)',
+        'font-size': '26px',
+        'text-outline-width': '8',
+        'text-outline-color': '#E8E8E8',
+        'width': '84px',
+        'height': '84px',
+        'background-color': '#5aa5ff',
+        'border-width': '4px',
+        'border-color': '#4a90e2',
+        'background-fill': 'radial-gradient',
+        'background-gradient-stop-colors': '#ffffff #5aa5ff',
+        'background-gradient-stop-positions': '0% 100%',
+        'shadow-blur': 18,
+        'shadow-color': '#2d5aa0',
+        'shadow-opacity': 0.25,
+        'shadow-offset-x': 0,
+        'shadow-offset-y': 4,
+        'text-valign': 'center',
+        'text-halign': 'center'
+      }
+    },
+    {
+      selector: 'node[Vin]',
+      style: {
+        'background-color': 'red'
+      }
+    },
+    {
+      selector: 'edge',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distance': 'data(controlPointDistance)',
+        'control-point-weight': 'data(controlPointWeight)',
+        'control-point-step-size': EDGE_CURVE_SPACING,
+        'width': 5,
+        'line-color': '#4a90e2',
+        'target-arrow-shape': 'triangle',
+        'arrow-scale': 1.2,
+        'target-arrow-color': '#4a90e2',
+        'source-arrow-color': '#4a90e2',
+        'content': 'data(weight)',
+        'font-size': '24px',
+        'edge-text-rotation': 'autorotate',
+        'text-margin-y': 'data(labelOffset)',
+        'text-outline-width': 8,
+        'text-outline-color': '#E8E8E8'
+      }
+    },
 
-        {
-            selector: 'node[Vin]',
-            style: {
-            'background-color': 'red',
-            }
-        },
-
-        {
-            selector: 'edge',
-            style: {
-            'curve-style': 'unbundled-bezier',
-            'control-point-distance': '-40',
-            //'curve-style': 'bezier',
-            'target-arrow-shape': 'triangle',
-            'content': 'data(weight)',
-            'text-outline-width': '4',
-            'text-outline-color': '#E8E8E8'
-            }
-        },
-
-        {
-            selector: '.eh-handle',
-            style: {
-            'background-color': 'red',
-            'width': 12,
-            'height': 12,
-            'shape': 'ellipse',
-            'overlay-opacity': 0,
-            'border-width': 12, // makes the handle easier to hit
-            'border-opacity': 0
-            }
-        },
-
-        {
-            selector: '.eh-hover',
-            style: {
-            'background-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-source',
-            style: {
-            'border-width': 2,
-            'border-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-target',
-            style: {
-            'border-width': 2,
-            'border-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-preview, .eh-ghost-edge',
-            style: {
-            'background-color': 'red',
-            'line-color': 'red',
-            'target-arrow-color': 'red',
-            'source-arrow-color': 'red'
-            }
-        },
-
-        {
-            selector: '.eh-ghost-edge.eh-preview-active',
-            style: {
-            'opacity': 0
-            }
-        },
-        {
-            selector: ':selected',
-            style: {
-                'background-color': '#0069d9'
-            }
-        }
-        ,
-        {   // Style for the most dominant path
-            selector: '.highlighted',
-              style: {
-                'background-color': 'red',
-                'line-color': 'red',
-                'target-arrow-color': 'red',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-
-        {   // Style for cycles within the path
-            selector: '.cycle',
-              style: {
-                'background-color': 'blue',
-                'line-color': 'blue',
-                'target-arrow-color': 'blue',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Style for the weakest path
-            selector: '.weak_path',
-              style: {
-                'background-color': 'yellow',
-                'line-color': 'yellow',
-                'target-arrow-color': 'yellow',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Style for the common edges
-            selector: '.common_edge',
-              style: {
-                'background-color': 'purple',
-                'line-color': 'purple',
-                'target-arrow-color': 'purple',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Source Node for the Dominant path finder
-            selector: '.pink',
-              style: {
-                'background-color': '#d90069',
-                'line-color': '#d90069',
-                'target-arrow-color': '#d90069',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        },
-        {   // Target node for dominant path finder
-            selector: '.green',
-              style: {
-                'background-color': '#2E8B57',
-                'line-color': '#2E8B57',
-                'target-arrow-color': '#2E8B57',
-                'transition-property': 'background-color, line-color, target-arrow-color',
-                'transition-duration': '0.1s'
-              }
-        }
-        ],
-        elements: elements
-    });
-
-    //make lines straight
-    cy.edges().forEach((edge,idx) => {
-        if((edge.sourceEndpoint().x === edge.targetEndpoint().x) || (edge.sourceEndpoint().y === edge.targetEndpoint().y) && edge.source().edgesWith(edge.target()).length === 1) {
-            edge.css({'control-point-distance': '0'})
-        }
-
-    });
-
-    // log all nodes and edges of sfg
-    console.log("nodes:", cy.nodes());
-    // log node ids
-    console.log("node ids:", cy.nodes().map(node => node.id()));
-    console.log("edges:", cy.edges());
-
-    cy.on('tap', 'node', function(evt){
-        if(simplify_mode) {
-            let node = evt.target;
-            console.log( 'tapped ' + node.id() );
-            if (node === node1) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                node1 = null;
-            }
-            else if(node === node2) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                node2 = null;
-            }
-            else if(node1 === null){
-                cy.$('#'+node.id()).css({'background-color': '#03af03'})
-                node1 = node;
-            }
-            else if(node2 === null){
-                cy.$('#'+node.id()).css({'background-color': '#f8075a'})
-                node2 = node;
-            }
-        }
-        if(highlight_mode){
-            let node = evt.target;
-            console.log( 'tapped ' + node.id() );
-            if (node === hlt_src) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                hlt_src = null;
-            }
-            else if(node === hlt_tgt) {
-                cy.$('#'+node.id()).css({'background-color': ''})
-                hlt_tgt = null;
-            }
-            else if(hlt_src === null){ // sets highlight source node to green
-                cy.$('#'+node.id()).css({'background-color': '#03af03'})
-                hlt_src = node;
-            }
-            else if(hlt_tgt === null){ // sets highlight target node to red
-                cy.$('#'+node.id()).css({'background-color': '#f8075a'})
-                hlt_tgt = node;
-            }
-            if(hlt_src != null & hlt_tgt != null){
-                console.log("Time to highlight:)")
-                HighlightPath()
-            }else{
-                removeHighlightPrevious()
-            }
-        }
-    });
-
-
-    // Initialize edge hover functionality
-    initializeEdgeHover();
-    
-    const time2 = new Date();
-    let time_elapse = (time2 - time1)/1000;
-    console.log("elements:", elements);
-    console.log("make_sfg SFG loading time: " + time_elapse + " seconds");
+    // --- existing highlight / path styles to keep behaviour ---
+    {
+      selector: ':selected',
+      style: {
+        'background-color': '#0069d9'
+      }
+    },
+    {
+      selector: '.highlighted',
+      style: {
+        'background-color': 'red',
+        'line-color': 'red',
+        'target-arrow-color': 'red',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.cycle',
+      style: {
+        'background-color': 'blue',
+        'line-color': 'blue',
+        'target-arrow-color': 'blue',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.weak_path',
+      style: {
+        'background-color': 'yellow',
+        'line-color': 'yellow',
+        'target-arrow-color': 'yellow',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.common_edge',
+      style: {
+        'background-color': 'purple',
+        'line-color': 'purple',
+        'target-arrow-color': 'purple',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.pink',
+      style: {
+        'background-color': '#d90069',
+        'line-color': '#d90069',
+        'target-arrow-color': '#d90069',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    },
+    {
+      selector: '.green',
+      style: {
+        'background-color': '#2E8B57',
+        'line-color': '#2E8B57',
+        'target-arrow-color': '#2E8B57',
+        'transition-property': 'background-color, line-color, target-arrow-color',
+        'transition-duration': '0.1s'
+      }
+    }
+  ];
 }
+
+
+
+// Reusable factory to create an SFG Cytoscape instance
+function createSfgInstance(container, elements, extraOptions = {}) {
+  return cytoscape(Object.assign({
+    container,
+    layout: {
+      name: 'dagre',
+      nodeSep: 200,
+      edgeSep: 220,
+      rankSep: 120,
+      rankDir: 'LR',
+      fit: true,
+      minLen: function(edge){ return 2; }
+    },
+    wheelSensitivity: 0.4,
+    style: getSfgStyles(),
+    elements
+  }, extraOptions));
+}
+
+function make_sfg(elements) {
+  const container = document.getElementById('cy');
+  if (!container) {
+    console.warn('make_sfg: #cy container not found');
+    return;
+  }
+
+  var cy = window.cy = createSfgInstance(container, elements);
+  setupEdgeCurveCurvature(cy);
+
+  // make lines straight when aligned
+  cy.edges().forEach((edge, idx) => {
+    if (
+      (edge.sourceEndpoint().x === edge.targetEndpoint().x ||
+       edge.sourceEndpoint().y === edge.targetEndpoint().y) &&
+      edge.source().edgesWith(edge.target()).length === 1
+    ) {
+      edge.data('controlPointDistance', 0);
+      edge.data('controlPointWeight', 0.5);
+    }
+  });
+
+  // log all nodes and edges of sfg
+  console.log("nodes:", cy.nodes());
+  console.log("node ids:", cy.nodes().map(node => node.id()));
+  console.log("edges:", cy.edges());
+
+  cy.on('tap', 'node', function(evt){
+    if (simplify_mode) {
+      let node = evt.target;
+      console.log('tapped ' + node.id());
+      if (node === node1) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        node1 = null;
+      }
+      else if (node === node2) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        node2 = null;
+      }
+      else if (node1 === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#03af03' });
+        node1 = node;
+      }
+      else if (node2 === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#f8075a' });
+        node2 = node;
+      }
+    }
+    if (highlight_mode) {
+      let node = evt.target;
+      console.log('tapped ' + node.id());
+      if (node === hlt_src) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        hlt_src = null;
+      }
+      else if (node === hlt_tgt) {
+        cy.$('#' + node.id()).css({ 'background-color': '' });
+        hlt_tgt = null;
+      }
+      else if (hlt_src === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#03af03' });
+        hlt_src = node;
+      }
+      else if (hlt_tgt === null) {
+        cy.$('#' + node.id()).css({ 'background-color': '#f8075a' });
+        hlt_tgt = node;
+      }
+      if (hlt_src != null & hlt_tgt != null) {
+        console.log("Time to highlight:)");
+        HighlightPath();
+      } else {
+        removeHighlightPrevious();
+      }
+    }
+  });
+
+  // Initialize edge hover functionality
+  initializeEdgeHover();
+
+  renderCurrentLabelMode();
+
+  try {
+        autoRelocateIVNodesPrefix({
+            animate: false,
+            duration: 350,
+            iscOffsetPx: 50
+        });
+    } catch (e) {
+        console.warn('autoRelocateIVNodesPrefix after simplification/branch removal failed:', e);
+    }
+
+  const time2 = new Date();
+  let time_elapse = (time2 - time1)/1000;
+  console.log("elements:", elements);
+  console.log("make_sfg SFG loading time: " + time_elapse + " seconds");
+}
+
+function setupEdgeCurveCurvature(cy) {
+  if (!cy || cy.destroyed()) {
+    return;
+  }
+
+  const scheduleUpdate = () => scheduleEdgeCurveUpdate(cy);
+
+  scheduleUpdate();
+  cy.on('layoutstop', scheduleUpdate);
+  cy.on('add remove', 'edge', scheduleUpdate);
+  cy.on('position', 'node', scheduleUpdate);
+}
+
+function applyEdgeCurves(cy) {
+  if (!cy || cy.destroyed()) {
+    return;
+  }
+
+  cy.edges().forEach((edge, idx) => {
+    if (!edge || !edge.isEdge() || edge.destroyed()) {
+      return;
+    }
+
+    edge.data('symbolicIndex', idx);
+
+    if (edge.data('labelOffset') === undefined || edge.data('labelOffset') === null) {
+      edge.data('labelOffset', EDGE_LABEL_OFFSET_BASE);
+    }
+  });
+
+  const groupedOutgoing = new Map();
+  const groupedIncoming = new Map();
+  const pairedEdges = new Map();
+
+  cy.edges().forEach(edge => {
+    if (!edge.isEdge() || edge.destroyed()) {
+      return;
+    }
+
+    const sourceEndpoint = edge.sourceEndpoint();
+    const targetEndpoint = edge.targetEndpoint();
+
+    if (!sourceEndpoint || !targetEndpoint) {
+      return;
+    }
+
+    const isVertical = Math.abs(sourceEndpoint.x - targetEndpoint.x) < 1;
+    const isHorizontal = Math.abs(sourceEndpoint.y - targetEndpoint.y) < 1;
+    const isSingleConnection = edge.source().edgesWith(edge.target()).length === 1;
+
+    if ((isVertical || isHorizontal) && isSingleConnection) {
+      edge.scratch('_forceStraight', true);
+      edge.data('controlPointDistance', 0);
+      edge.data('controlPointWeight', 0.5);
+      return;
+    }
+
+    edge.removeScratch('_forceStraight');
+
+    const outKey = edge.source().id();
+    const inKey = edge.target().id();
+
+    if (!groupedOutgoing.has(outKey)) {
+      groupedOutgoing.set(outKey, []);
+    }
+    if (!groupedIncoming.has(inKey)) {
+      groupedIncoming.set(inKey, []);
+    }
+
+    groupedOutgoing.get(outKey).push(edge);
+    groupedIncoming.get(inKey).push(edge);
+
+    const pairKey = `${edge.source().id()}->${edge.target().id()}`;
+
+    if (!pairedEdges.has(pairKey)) {
+      pairedEdges.set(pairKey, []);
+    }
+
+    pairedEdges.get(pairKey).push(edge);
+  });
+
+  const assignRank = (collection, accessor, rankKey, sizeKey) => {
+    if (!collection || collection.length === 0) {
+      return;
+    }
+
+    collection.forEach(edge => edge.scratch(sizeKey, collection.length));
+
+    if (collection.length === 1) {
+      collection[0].scratch(rankKey, 0);
+      return;
+    }
+
+    collection
+      .sort((a, b) => accessor(a) - accessor(b))
+      .forEach((edge, idx) => {
+        const offset = idx - (collection.length - 1) / 2;
+        edge.scratch(rankKey, offset);
+      });
+  };
+
+  groupedOutgoing.forEach(edges => {
+    assignRank(edges, edge => edge.target().position('y'), '_outRank', '_outSize');
+  });
+
+  groupedIncoming.forEach(edges => {
+    assignRank(edges, edge => edge.source().position('y'), '_inRank', '_inSize');
+  });
+
+  pairedEdges.forEach(edges => {
+    edges
+      .sort((a, b) => {
+        const targetDiff = a.target().position('y') - b.target().position('y');
+
+        if (targetDiff !== 0) {
+          return targetDiff;
+        }
+
+        const sourceDiff = a.source().position('y') - b.source().position('y');
+
+        if (sourceDiff !== 0) {
+          return sourceDiff;
+        }
+
+        return a.id().localeCompare(b.id());
+      })
+      .forEach((edge, idx) => {
+        edge.scratch('_pairIndex', idx);
+        edge.scratch('_pairSize', edges.length);
+      });
+  });
+
+  const positions = cy.nodes().map(node => node.position());
+  const center = positions.reduce((acc, pos) => {
+    acc.x += pos.x;
+    acc.y += pos.y;
+    return acc;
+  }, { x: 0, y: 0 });
+
+  if (positions.length) {
+    center.x /= positions.length;
+    center.y /= positions.length;
+  }
+
+  const bbox = cy.elements().boundingBox();
+  const maxRadius = Math.max(bbox.w, bbox.h) / 2;
+  const safeRadius = Math.max(maxRadius, 1);
+
+  cy.edges().forEach(edge => {
+    if (!edge.isEdge() || edge.destroyed()) {
+      return;
+    }
+
+    const forceStraight = edge.scratch('_forceStraight');
+    const outRank = edge.scratch('_outRank') || 0;
+    const inRank = edge.scratch('_inRank') || 0;
+    const outSize = edge.scratch('_outSize') || 1;
+    const inSize = edge.scratch('_inSize') || 1;
+    const pairIndex = edge.scratch('_pairIndex') || 0;
+    const pairSize = edge.scratch('_pairSize') || 1;
+
+    const cleanupScratch = () => {
+      edge.removeScratch('_outRank');
+      edge.removeScratch('_inRank');
+      edge.removeScratch('_outSize');
+      edge.removeScratch('_inSize');
+      edge.removeScratch('_pairIndex');
+      edge.removeScratch('_pairSize');
+    };
+
+    const sourcePos = edge.source().position();
+    const targetPos = edge.target().position();
+    const dx = targetPos.x - sourcePos.x;
+    const dy = targetPos.y - sourcePos.y;
+    const spanLength = Math.hypot(dx, dy);
+    const midX = (sourcePos.x + targetPos.x) / 2;
+    const midY = (sourcePos.y + targetPos.y) / 2;
+    const toCenterX = midX - center.x;
+    const toCenterY = midY - center.y;
+    const centerDistance = Math.hypot(toCenterX, toCenterY);
+    const norm = spanLength === 0 ? 1 : spanLength;
+    const perpX = -dy / norm;
+    const perpY = dx / norm;
+    const outward = perpX * toCenterX + perpY * toCenterY;
+    const combinedOffset = outRank - inRank;
+    let directionSign = outward >= 0 ? 1 : -1;
+
+    if (Math.abs(outward) < 0.01) {
+      if (combinedOffset !== 0) {
+        directionSign = combinedOffset > 0 ? 1 : -1;
+      } else if (dy !== 0) {
+        directionSign = dy > 0 ? 1 : -1;
+      }
+    }
+
+    const outSpread = outSize > 1 ? outRank / ((outSize - 1) / 2) : 0;
+    const inSpread = inSize > 1 ? inRank / ((inSize - 1) / 2) : 0;
+    const spreadMagnitude = Math.abs(outRank) + Math.abs(inRank);
+    const pairSpread = pairSize > 1 ? pairIndex - (pairSize - 1) / 2 : 0;
+    const normalizedPairSpread = pairSize > 1 ? pairSpread / ((pairSize - 1) / 2) : 0;
+
+    const labelWidth = measureEdgeLabelWidth(edge);
+    const labelRatio = spanLength > 0 ? labelWidth / spanLength : 1;
+    const labelDirectionBias = directionSign * EDGE_LABEL_OFFSET_STEP * 0.55;
+    const labelCrowdingBias = combinedOffset * EDGE_LABEL_OFFSET_STEP * 0.35;
+    const pairLaneBias = normalizedPairSpread * EDGE_LABEL_OFFSET_STEP * 1.15;
+    const rawLabelOffset = EDGE_LABEL_OFFSET_BASE + labelDirectionBias + labelCrowdingBias + pairLaneBias;
+    const labelOffset = Math.max(-220, Math.min(220, rawLabelOffset));
+
+    edge.data('labelOffset', labelOffset);
+
+    if (forceStraight) {
+      cleanupScratch();
+      return;
+    }
+
+    let magnitude = EDGE_BASE_CURVE_DISTANCE;
+    magnitude += spreadMagnitude * (EDGE_CURVE_SPACING * 0.6);
+    magnitude += Math.abs(combinedOffset) * (EDGE_CURVE_SPACING * 0.4);
+    magnitude += Math.abs(pairSpread) * (EDGE_CURVE_SPACING * 1.1);
+    magnitude += labelWidth * EDGE_LABEL_WIDTH_SCALE;
+
+    if (labelRatio > 0.85) {
+      magnitude += (labelRatio - 0.85) * EDGE_CURVE_SPACING * 2.1;
+    }
+
+    if (spanLength > EDGE_CURVE_LENGTH_BASE) {
+      magnitude += ((spanLength - EDGE_CURVE_LENGTH_BASE) / EDGE_CURVE_LENGTH_SCALE) * EDGE_CURVE_SPACING;
+    }
+
+    if (spanLength < labelWidth * 0.9) {
+      magnitude += (labelWidth * 0.9 - spanLength) * 0.9;
+    }
+
+    if (centerDistance <= safeRadius) {
+      const centerRatio = 1 - Math.min(centerDistance / safeRadius, 1);
+      magnitude += centerRatio * EDGE_CENTER_EXPANSION;
+    }
+
+    magnitude = Math.max(EDGE_MIN_CURVE_MAGNITUDE, magnitude);
+
+    let distance = directionSign * magnitude;
+
+    if (distance === 0) {
+      distance = directionSign >= 0 ? EDGE_MIN_CURVE_MAGNITUDE : -EDGE_MIN_CURVE_MAGNITUDE;
+    }
+
+    const weightBase = (outSpread - inSpread) * EDGE_WEIGHT_SHIFT;
+    const pairBias = normalizedPairSpread * 0.18;
+    const outwardBias = directionSign * 0.08;
+    const labelBias = Math.max(-0.15, Math.min(0.15, (labelRatio - 1) * 0.12));
+    const weight = Math.max(0.12, Math.min(0.88, 0.5 + weightBase + outwardBias + pairBias + labelBias));
+
+    edge.data('controlPointDistance', distance);
+    edge.data('controlPointWeight', weight);
+
+    cleanupScratch();
+  });
+}
+
 
 
 //SCALING WORKING
@@ -317,6 +794,10 @@ function make_sfg(elements) {
 function alignLayers(svgLayer, sfgLayer) {
     const svgBounds = svgLayer.getBoundingClientRect();
     const sfgBounds = sfgLayer.getBoundingClientRect();
+
+    if (!svgBounds.width || !svgBounds.height) {
+        return;
+    }
 
     const scaleX = sfgBounds.width / svgBounds.width;
     const scaleY = sfgBounds.height / svgBounds.height;
@@ -327,7 +808,7 @@ function alignLayers(svgLayer, sfgLayer) {
     svgLayer.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scaleX}, ${scaleY})`;
 
     svgLayer.style.opacity = 0.5;
-    sfgLayer.style.opacity = 0.8;
+    sfgLayer.style.opacity = 1;
 
     console.log("SVG aligned with SFG:", { scaleX, scaleY, offsetX, offsetY });
 }
@@ -335,9 +816,13 @@ function alignLayers(svgLayer, sfgLayer) {
 
 function renderOverlay(data) {
   const svgLayer = document.getElementById('svg-layer');
-  const sfgLayer = document.getElementById('sfg-layer');
+  const sfgLayer = document.getElementById('cy');
 
-  // ----- SVG generation -----
+  if (!svgLayer || !sfgLayer) {
+    console.warn('renderOverlay: missing #svg-layer or #cy containers');
+    return;
+  }
+
   svgLayer.innerHTML = data.svg;
 
   const svgElement = svgLayer.querySelector('svg');
@@ -346,95 +831,27 @@ function renderOverlay(data) {
     const viewBoxValue =
       `${boundingBox.x} ${boundingBox.y} ${boundingBox.width} ${boundingBox.height}`;
     svgElement.setAttribute('viewBox', viewBoxValue);
+    svgElement.style.width = '100%';
+    svgElement.style.height = '100%';
   }
 
-  // ----- SFG generation for overlay (fresh Cytoscape instance) -----
-  // Generate SFG elements *inside* renderOverlay
-  const overlayElements = edge_helper(data, symbolic_flag); // returns { nodes, edges, ... }
-
-  // Destroy a previous overlay instance if it exists
-  if (window.overlayCy && typeof window.overlayCy.destroy === 'function') {
-    window.overlayCy.destroy();
-  }
-
-  const overlayCy = window.overlayCy = cytoscape({
-    container: sfgLayer,
-
-    elements: overlayElements,
-
-    layout: {
-      name: 'dagre',
-      nodeSep: 200,
-      edgeSep: 200,
-      rankSep: 100,
-      rankDir: 'LR',
-      fit: true,
-      minLen: function (edge) { return 2; },
-    },
-
-    wheelSensitivity: 0.4,
-
-    style: [
-      {
-        selector: 'node[name]',
-        style: {
-          'content': 'data(name)',
-        },
-      },
-      {
-        selector: 'node[Vin]',
-        style: {
-          'background-color': 'red',
-        },
-      },
-      {
-        selector: 'edge',
-        style: {
-          'curve-style': 'unbundled-bezier',
-          'control-point-distance': '-40',
-          'target-arrow-shape': 'triangle',
-          'content': 'data(weight)',
-          'text-outline-width': 4,
-          'text-outline-color': '#E8E8E8',
-        },
-      },
-      // If you *don’t* need all the selection/highlight styles in the overlay,
-      // you can omit the extra selectors used in make_sfg to keep overlay simpler.
-    ],
-  });
-
-  // Optional: straighten edges in the overlay too (same logic as make_sfg)
-  overlayCy.edges().forEach((edge) => {
-    if (
-      (edge.sourceEndpoint().x === edge.targetEndpoint().x ||
-        edge.sourceEndpoint().y === edge.targetEndpoint().y) &&
-      edge.source().edgesWith(edge.target()).length === 1
-    ) {
-      edge.css({ 'control-point-distance': '0' });
-    }
-  });
-
-  // Once overlay Cytoscape is ready, align the layers
-  overlayCy.ready(() => {
-    overlayCy.resize();
-    overlayCy.fit();
+  requestAnimationFrame(() => {
     alignLayers(svgLayer, sfgLayer);
 
-    // If autoRelocateIVNodesPrefix expects window.cy,
-    // temporarily point it to overlayCy
     try {
-      const oldCy = window.cy;
-      window.cy = overlayCy;
-      autoRelocateIVNodesPrefix({
-        animate: false,
-        iscOffsetPx: 18,
-      });
-      window.cy = oldCy;
+      if (window.cy) {
+        autoRelocateIVNodesPrefix({
+          animate: false,
+          iscOffsetPx: 50,
+        });
+        scheduleEdgeCurveUpdate(window.cy);
+      }
     } catch (e) {
-      console.warn('Auto placement failed in overlay:', e);
+      console.warn('Auto placement failed while syncing overlay:', e);
     }
   });
 }
+
 
 
 
@@ -917,85 +1334,11 @@ function removeHighlight(){
     // });
 // }
 
-// Removes the selected branch from the diagram
-function qremoveBranch() {
-    console.log("removeBranch is called");
-
-    // Define the event handler to handle tap events on edges
-    function edgeTapHandler(evt) {
-        let tappedEdge = evt.target; // Get the tapped edge
-        console.log('Tapped Edge:', tappedEdge);
-
-        // Remove the popper element associated with the tapped edge
-        let edgePopper = tappedEdge.popper(destroy
-            
-        ); // Retrieve the popper element
-        if (edgePopper) {
-            edgePopper.destroy(); // Destroy the popper element
-            console.log('Popper removed:', edgePopper);
-            // Remove the tapped edge from the diagram
-            tappedEdge.remove();
-            console.log('Edge removed:', tappedEdge);
-        }
-
-        // Turn off the event handler after the first edge has been removed
-        cy.off('tap', 'edge', edgeTapHandler);
-    }
-
-    // Attach the event handler to listen for tap events on edges
-    cy.on('tap', 'edge', edgeTapHandler);
-
-}
 
 function removeLatexCode(latexCode, idx) {
     edge_symbolic_label[idx] = '';
 }
 
-// TODO MARK: Make sure branch removals are consistent with the editBranch() logic
-// TODO MARK: make sure floating nodes are also removed
-function tremoveBranch() {
-    console.log("removeBranch is called");
-    let cy = window.cy;
-
-    function edgeTapHandler(evt) {
-        let edge = evt.target;
-        let idx = cy.edges().indexOf(edge);
-
-        // Remove the label for the edge being removed
-        edge_symbolic_label.splice(idx, 1);
-
-        document.getElementById("rmv-branch-btn").disabled = false;
-
-        console.log('edge removed:', edge);
-        cy.off('tap', 'edge', edgeTapHandler);
-        edge.remove(); 
-        reset_mag_labels();
-        console.log("edge_symbolic_label:", edge_symbolic_label);
-
-        // Update the indices in edge_symbolic_label to match the new indices of the remaining edges
-        updateIndicesInSymbolicLabels();
-    }
-
-    // Attach the event listener to edges for click
-    cy.on('tap', 'edge', edgeTapHandler);
-    document.getElementById("rmv-branch-btn").disabled = true;
-
-    // Update cy style and log loading time
-    cy.style().selector('edge').css({ 'content': '' }).update();
-    const time2 = new Date();
-    let time_elapse = (time2 - time1) / 1000;
-    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
-
-    // Function to update the indices in edge_symbolic_label array
-    function updateIndicesInSymbolicLabels() {
-        cy.edges().forEach((edge, i) => {
-            let label = edge_symbolic_label[i];
-            if (label !== undefined) {
-                edge_symbolic_label[i] = label;
-            }
-        });
-    }
-}
 
 // Function to initialize event listeners for edges
 function initializeEdgeHover() {
@@ -1095,98 +1438,6 @@ function updateEdgeInfoPosition(event) {
     edgeInfoElement.style.top = (event.clientY + 15) + 'px';  // Offset to avoid cursor overlap
 }
 
-function removeBranch() {
-    console.log("removeBranch is called");
-    let cy = window.cy;
-    function edgeTapHandler(evt){
-        let edge = evt.target;
-        edge.style('display', 'none');
-        // edge.remove();
-
-        // let idx = cy.edges().indexOf(edge);
-        // edgeToRemove = cy.getElementById(idx);
-        // console.log('idx:', idx);
-        // console.log("edgeToRemove:", edgeToRemove);
-        // edgeToRemove.remove();
-        // edge_symbolic_label[idx] = '';
-        
-        console.log("edge_symbolic_label array:", edge_symbolic_label);
-        // edge_symbolic_label.splice(idx,1); // Remove the latex code for the edge
-        
-        // // Adjust indices for edges after the removed edge
-        // for (let i = idx + 1; i < cy.edges().length; i++) {
-        //     edge_symbolic_label[i - 1] = edge_symbolic_label[i];
-        // }
-        // edge_symbolic_label.pop(); // Remove the last element
-        
-
-        // Construct data for the DELETE request
-        let data = {
-            source: edge.data('source'), // Get source node ID
-            target: edge.data('target')  // Get target node ID
-        };
-
-        console.log("edge id:", edge.id());
-        console.log("edge data:", edge.data());
-
-        // Remove the edge from Cytoscape
-        edge.remove();
-
-        // Update the backend with the removed branch
-        remove_edge_request(data);
-
-        document.getElementById("rmv-branch-btn").disabled = false;
-        
-        console.log('edge (edge id) removed:', edge.id());
-        cy.off('tap', 'edge', edgeTapHandler);
-        console.log("edge_symbolic_label:", edge_symbolic_label);
-        reset_mag_labels();
-    }
-
-    // Attach the event listener to edges for click
-    cy.on('tap', 'edge', edgeTapHandler);
-    document.getElementById("rmv-branch-btn").disabled = true;
-
-    // Update cy style and log loading time
-    cy.style().selector('edge').css({ 'content': '' }).update();
-    const time2 = new Date();
-    let time_elapse = (time2 - time1) / 1000;
-    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
-}
-
-function remove_edge_request(data) {
-    console.log('DELETE request payload:', data);  // Log the payload
-
-
-
-    let url = `${baseUrl}/circuits/${circuitId}/edges`;
-    console.log("sending DELETE request to:", url);
-    fetch(url, {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        mode: 'cors',
-        credentials: 'same-origin',
-        body: JSON.stringify(data)
-    })
-    .then(response => {
-        console.log("received DELETE response from server");
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-    })
-    .then(data => {
-        removeHighlight();
-        console.log("remove_edge_request received data: ", data);
-        // update_frontend(data);
-    })
-    .catch(error => {
-        console.error('Error during DELETE request:', error);
-        alert('An error occurred while removing the edge. Please check the server logs.');
-    });
-}
 
 function removeBranchLikeSimplify() {
     console.log("removeBranch is called");
@@ -1233,8 +1484,9 @@ function removeBranchLikeSimplify() {
 
 function removeBranchLikeSimplify_request(params) {
     // ensure url matches with the server route
-    let url = new URL(`${baseUrl}/circuits/${circuitId}/remove_branch`)
+    let url = new URL(`${baseUrl}/circuits/${circuitId}/remove_branch`);
     console.log("sending PATCH request to:", url);
+
     fetch(url, {
         // ensure meta instructions match with server
         method: 'PATCH',
@@ -1254,22 +1506,21 @@ function removeBranchLikeSimplify_request(params) {
         return response.json();
     })
     .then(data => {
-        console.log("data" , data);
-        // console.log("weight", data.sfg.elements.edges[0].data.weight);
-        if(stack_len==0){
+        console.log("data", data);
+        if (stack_len == 0) {
             disable_undo_btn(false);
         }
         if (redo_len > 0) {
             redo_len = 0;
             disable_redo_btn(true);
         }
-        stack_len = stack_len < 5 ? stack_len + 1 : 5
+        stack_len = stack_len < 5 ? stack_len + 1 : 5;
         
-        // removeHighlight();
         console.log("remove_edge_request received data: ", data);
-        // from old code
+
+        // Rebuild SFG + params
         update_frontend(data);
-        
+
         // additional: like the sfg_simplify_request() funciton
         simplify_mode_toggle()
         reset_mag_labels()
@@ -1578,119 +1829,6 @@ function editBranch() {
 }
 
 
-
-
-// function qqremoveBranch() {
-//     // Print that this function is called from
-//     console.log("removeBranch is called");
-
-//     let cy = window.cy;
-//     let updates = new Array(cy.edges().length)
-//     let edges = new Array(cy.edges().length)
-
-//     cy.edges().forEach((edge,idx) => {
-//         edge.on('tap', function(evt){
-//             // Remove the edge from the diagram
-//             edge.remove();
-//             console.log('Edge removed:', edge);
-//         });
-//     });
-
-
-//     // Define the event handler to handle tap events on edges
-//     function edgeTapHandler(evt) {
-//         let tappedEdge = evt.target; // Get the tapped edge
-//         console.log('Tapped Edge:', tappedEdge);
-
-//         // Remove the popper element associated with the tapped edge
-//         let edgePopper = tappedEdge.scratch('_popper'); // Retrieve the popper element
-//         if (edgePopper) {
-//             // print edgepopper content
-//             console.log('Edge Popper:', edgePopper);
-//             edgePopper.destroy(); // Destroy the popper element
-//             console.log('Popper removed:', edgePopper);
-//         }
-
-//         // Remove the tapped edge from the diagram
-//         tappedEdge.remove();
-//         console.log('Edge removed:', tappedEdge);
-
-//         //re-render the SFG
-
-
-//         // Turn off the event handler after the first edge has been removed
-//         cy.off('tap', 'edge', edgeTapHandler);
-//     }
-
-//     // Attach the event handler to listen for tap events on edges
-//     cy.on('tap', 'edge', edgeTapHandler);
-
-//     // // Define the event handler to handle remove events on edges
-//     // function edgeRemoveHandler(evt) {
-//     //     let removedEdge = evt.target; // Get the removed edge
-//     //     console.log('Removed Edge:', removedEdge);
-
-//     //     // Remove the popper element associated with the removed edge
-//     //     let edgePopper = removedEdge.scratch('_popper'); // Retrieve the popper element
-//     //     if (edgePopper) {
-//     //         edgePopper.destroy(); // Destroy the popper element
-//     //         console.log('Popper removed:', edgePopper);
-//     //     }
-//     //     cy.off('remove', 'edge', edgeRemoveHandler);
-//     // }
-
-//     // // Attach the event handler to listen for remove events on edges
-//     // cy.on('remove', 'edge', edgeRemoveHandler);
-// }
-
-// // Removes the selected branch from the diagram
-// function primitiveremoveBranch() {
-//     // Print that this function is called from
-//     console.log("removeBranch is called");
-
-//     // Get the edge that is clicked
-//     // function edgeTapHandler(evt) {
-//     //     cy.edges().forEach((edge, idx) => {
-//     //         edge.on('tap', function(evt){
-//     //             // Remove the edge from the diagram
-//     //             edge.remove();
-//     //             console.log('Edge removed:', edge);
-//     //         });
-//     //     });
-//     //     // Turn off the event handler after the first edge has been removed
-//     //     cy.off('tap', 'edge', edgeTapHandler);
-//     // }
-    
-
-//     // Define the event handler to handle tap events on edges
-//     function edgeTapHandler(evt) {
-//         let tappedEdge = evt.target; // Get the tapped edge
-//         console.log('Tapped Edge:', tappedEdge);
-
-//         // Remove the tapped edge from the diagram
-//         tappedEdge.remove();
-//         reset_mag_labels();
-//         console.log('Edge removed:', tappedEdge);
-        
-//         // // Remove the popper element associated with the tapped edge
-//         // let edgePopper = tappedEdge.scratch('_popper');
-//         //     if (edgePopper) {
-//         //     edgePopper.destroy();
-//         //     console.log('Popper removed:', edgePopper);
-//         // }
-
-//         // // Update the edges
-//         // tappedEdge.update();
-
-
-//         // Turn off the event handler after the first edge has been removed
-//         cy.off('tap', 'edge', edgeTapHandler);
-//     }
-
-//     // Attach the event handler to listen for tap events on edges
-//     cy.on('tap', 'edge', edgeTapHandler);
-// }
-
 function  display_mag_sfg() {
     let cy = window.cy;
 
@@ -1750,9 +1888,12 @@ function  display_mag_sfg() {
     
     });
 
-    MathJax.typeset();
-    
+    if (window.MathJax && typeof MathJax.typeset === 'function') {
+        MathJax.typeset();
+    }
+
     cy.style().selector('edge').css({'content': ''}).update()
+    applyEdgeLabelVisibility(cy);
     const time2 = new Date()
     let time_elapse = (time2 - time1)/1000
     console.log("display_mag_sfg SFG loading time: " + time_elapse + " seconds")
@@ -1927,7 +2068,7 @@ function sfg_patch_request_without_rerender(params) {
 // this function
 function sfg_simplify_request(params) {
 
-    let url = new URL(`${baseUrl}/circuits/${circuitId}/simplify`)
+    let url = new URL(`${baseUrl}/circuits/${circuitId}/simplify`);
 
     fetch(url, {
         method: 'PATCH',
@@ -1940,7 +2081,7 @@ function sfg_simplify_request(params) {
     })
     .then(response => response.json())
     .then(data => {
-        if(stack_len==0){
+        if (stack_len == 0) {
             disable_undo_btn(false);
         }
         if (redo_len > 0) {
@@ -2004,7 +2145,7 @@ function render_frontend(data) {
     make_frequency_bounds()
 
     // Render the overlay
-    renderOverlay(data, curr_elements); 
+    renderOverlay(data);
 }
 
 
@@ -2023,20 +2164,8 @@ document.addEventListener('DOMContentLoaded', load_interface);
 
 async function sfg_toggle() {
     symbolic_flag = !symbolic_flag
-    //document.getElementById("frequency-slider").disabled = !document.getElementById("frequency-slider").disabled
+    updateSymbolicUIState();
     try {
-        // Disable frequency slider on symbolic
-        if (!symbolic_flag) {
-            document.getElementById("frequency-slider").disabled = false;
-            document.getElementById("rmv-branch-btn").disabled = true;
-            document.getElementById("edit-branch-btn").disabled = true;
-        }
-        else {
-            document.getElementById("frequency-slider").disabled = true;
-            document.getElementById("rmv-branch-btn").disabled = false;
-            document.getElementById("edit-branch-btn").disabled = false;
-        }
-
         // let url = new URL(`${baseUrl}/circuits/${circuitId}`)
         // const response = await fetch(url)
         // let data = await response.json()
@@ -2044,19 +2173,9 @@ async function sfg_toggle() {
         //remove existing magnitude labels
 
         const time1 = new Date()
-    
 
-        const symbolic_labels = document.querySelectorAll('.label');
-        symbolic_labels.forEach(label => {
-            label.remove();
-        });
 
-        if(symbolic_flag) {
-            display_mag_sfg();
-        }
-        else {
-            window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
-        }
+        renderCurrentLabelMode();
 
         const time2 = new Date()
 
@@ -2087,6 +2206,8 @@ if (return_landing) {
         window.location.replace('./landing.html');
     })
 }
+
+updateSymbolicUIState();
 
 // HTML Frequency slider element
 let frequency_slider = document.getElementById("frequency-slider");
@@ -3737,6 +3858,8 @@ function sfg_simplification_entire_graph_trivial(params) {
             disable_redo_btn(true);
         }
         stack_len = Math.min(stack_len + 1, 5);
+
+        // Rebuild SFG
         update_frontend(data);
         simplify_mode_toggle();
         reset_mag_labels();
@@ -3848,12 +3971,7 @@ function sfg_redo(){
 
 function reset_mag_labels(){
     if(symbolic_flag) {
-        const symbolic_labels = document.querySelectorAll('.label');
-        symbolic_labels.forEach(label => {
-            label.remove();
-        });
-
-        display_mag_sfg();
+        renderSymbolicLabels();
     }
 }
 
@@ -4345,9 +4463,9 @@ function validateNode(nodeId) {
   function prepareOverlay() {
     const overlay = byId('overlay-container');
     const svgLayer = byId('svg-layer');
-    const sfgLayer = byId('sfg-layer');
+    const sfgLayer = byId('cy');
     if (!overlay || !svgLayer || !sfgLayer) {
-      console.warn('[overlay] Missing #overlay-container/#svg-layer/#sfg-layer');
+      console.warn('[overlay] Missing #overlay-container/#svg-layer/#cy');
       return false;
     }
     overlay.style.position = 'relative';
@@ -4355,7 +4473,7 @@ function validateNode(nodeId) {
     if ((parseFloat(getComputedStyle(overlay).height) || 0) < 300) {
       overlay.style.height = '600px';
     }
-    [svgLayer, sfgLayer].forEach(el => {
+    [svgLayer].forEach(el => {
       el.style.position = 'absolute';
       el.style.top = el.style.left = el.style.right = el.style.bottom = '0';
     });
@@ -4375,10 +4493,6 @@ function validateNode(nodeId) {
     const svg = getOverlaySvg();
     if (svg) ensureSvgViewBox(svg);
 
-    // Mount Cytoscape into #sfg-layer if needed
-    if (window.cy && typeof window.cy.mount === 'function') {
-      try { window.cy.mount(sfgLayer); } catch (e) { /* ignore */ }
-    }
     return true;
   }
 
