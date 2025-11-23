@@ -511,13 +511,15 @@ function make_sfg(elements) {
   renderCurrentLabelMode();
 
   try {
+      if (window.cy) {
         autoRelocateIVNodesPrefix({
-            animate: false,
-            duration: 350,
-            iscOffsetPx: 50
+          animate: false,
+          iscOffsetPx: 50
         });
+        scheduleEdgeCurveUpdate(window.cy);
+      }
     } catch (e) {
-        console.warn('autoRelocateIVNodesPrefix after simplification/branch removal failed:', e);
+      console.warn('Auto placement failed while syncing overlay:', e);
     }
 
   const time2 = new Date();
@@ -1334,6 +1336,7 @@ function removeHighlight(){
     // });
 // }
 
+// Removes the selected branch from the diagram
 
 function removeLatexCode(latexCode, idx) {
     edge_symbolic_label[idx] = '';
@@ -1438,6 +1441,40 @@ function updateEdgeInfoPosition(event) {
     edgeInfoElement.style.top = (event.clientY + 15) + 'px';  // Offset to avoid cursor overlap
 }
 
+ //TODO:Confirm if function below needs to be removed. (2025/2026) 
+function remove_edge_request(data) {
+    console.log('DELETE request payload:', data);  // Log the payload
+
+
+
+    let url = `${baseUrl}/circuits/${circuitId}/edges`;
+    console.log("sending DELETE request to:", url);
+    fetch(url, {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        mode: 'cors',
+        credentials: 'same-origin',
+        body: JSON.stringify(data)
+    })
+    .then(response => {
+        console.log("received DELETE response from server");
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        removeHighlight();
+        console.log("remove_edge_request received data: ", data);
+        // update_frontend(data);
+    })
+    .catch(error => {
+        console.error('Error during DELETE request:', error);
+        alert('An error occurred while removing the edge. Please check the server logs.');
+    });
+}
 
 function removeBranchLikeSimplify() {
     console.log("removeBranch is called");
@@ -1484,9 +1521,8 @@ function removeBranchLikeSimplify() {
 
 function removeBranchLikeSimplify_request(params) {
     // ensure url matches with the server route
-    let url = new URL(`${baseUrl}/circuits/${circuitId}/remove_branch`);
+    let url = new URL(`${baseUrl}/circuits/${circuitId}/remove_branch`)
     console.log("sending PATCH request to:", url);
-
     fetch(url, {
         // ensure meta instructions match with server
         method: 'PATCH',
@@ -1506,21 +1542,22 @@ function removeBranchLikeSimplify_request(params) {
         return response.json();
     })
     .then(data => {
-        console.log("data", data);
-        if (stack_len == 0) {
+        console.log("data" , data);
+        // console.log("weight", data.sfg.elements.edges[0].data.weight);
+        if(stack_len==0){
             disable_undo_btn(false);
         }
         if (redo_len > 0) {
             redo_len = 0;
             disable_redo_btn(true);
         }
-        stack_len = stack_len < 5 ? stack_len + 1 : 5;
+        stack_len = stack_len < 5 ? stack_len + 1 : 5
         
+        // removeHighlight();
         console.log("remove_edge_request received data: ", data);
-
-        // Rebuild SFG + params
+        // from old code
         update_frontend(data);
-
+        
         // additional: like the sfg_simplify_request() funciton
         simplify_mode_toggle()
         reset_mag_labels()
@@ -1828,7 +1865,6 @@ function editBranch() {
     console.log("editBranch SFG loading time: " + time_elapse + " seconds");
 }
 
-
 function  display_mag_sfg() {
     let cy = window.cy;
 
@@ -2068,7 +2104,7 @@ function sfg_patch_request_without_rerender(params) {
 // this function
 function sfg_simplify_request(params) {
 
-    let url = new URL(`${baseUrl}/circuits/${circuitId}/simplify`);
+    let url = new URL(`${baseUrl}/circuits/${circuitId}/simplify`)
 
     fetch(url, {
         method: 'PATCH',
@@ -2081,7 +2117,7 @@ function sfg_simplify_request(params) {
     })
     .then(response => response.json())
     .then(data => {
-        if (stack_len == 0) {
+        if(stack_len==0){
             disable_undo_btn(false);
         }
         if (redo_len > 0) {
