@@ -50,7 +50,7 @@
             <div class="column1">
               <div id="sfg-extra">
                 <h1> Select option: </h1> 
-                <input type="checkbox" id="feature-toggle"> Magnitude / Symbolic Toggle
+                <input type="checkbox" id="feature-toggle" checked> Magnitude / Symbolic Toggle
                 <!-- <div class="container1">
                   <input type="checkbox" class="checkbox1" id="feature-toggle"> Magnitude / Symbolic Toggle>
                   <label class="switch1" for="feature-toggle">
@@ -110,24 +110,16 @@
           </div>
           <div class="sfg-section">
             <h1>SFG Simulation</h1>
-            <div id="cy"></div>
+            <div id="overlay-container">
+              <div id="svg-layer" aria-hidden="true"></div>
+              <div id="cy"></div>
+            </div>
             <div id="edge-info"></div>
           </div>
 
           <div id="toggle-button-container">
             <button id="toggle-svg" onclick="toggleSVG()">Toggle Schematic (SVG)</button>
-          </div>
-        
-
-          <div class="overlay-section">
-            <h1>Overlay: Circuit and Signal-Flow Graph</h1>
-            <div id="overlay-container">
-              <!-- SVG Layer -->
-              <div id="svg-layer"></div>
-              
-              <!-- SFG Layer -->
-              <div id="sfg-layer"></div>
-            </div>
+            <button id="toggle-edge-labels" onclick="toggleEdgeLabels()">Toggle Edge Labels</button>
           </div>
           
 
