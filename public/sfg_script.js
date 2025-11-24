@@ -510,6 +510,18 @@ function make_sfg(elements) {
 
   renderCurrentLabelMode();
 
+  try {
+      if (window.cy) {
+        autoRelocateIVNodesPrefix({
+          animate: false,
+          iscOffsetPx: 50
+        });
+        scheduleEdgeCurveUpdate(window.cy);
+      }
+    } catch (e) {
+      console.warn('Auto placement failed while syncing overlay:', e);
+    }
+
   const time2 = new Date();
   let time_elapse = (time2 - time1)/1000;
   console.log("elements:", elements);
@@ -832,7 +844,7 @@ function renderOverlay(data) {
       if (window.cy) {
         autoRelocateIVNodesPrefix({
           animate: false,
-          iscOffsetPx: 18,
+          iscOffsetPx: 50,
         });
         scheduleEdgeCurveUpdate(window.cy);
       }
@@ -1325,84 +1337,11 @@ function removeHighlight(){
 // }
 
 // Removes the selected branch from the diagram
-function qremoveBranch() {
-    console.log("removeBranch is called");
-
-    // Define the event handler to handle tap events on edges
-    function edgeTapHandler(evt) {
-        let tappedEdge = evt.target; // Get the tapped edge
-        console.log('Tapped Edge:', tappedEdge);
-
-        // Remove the popper element associated with the tapped edge
-        let edgePopper = tappedEdge.popper(destroy
-            
-        ); // Retrieve the popper element
-        if (edgePopper) {
-            edgePopper.destroy(); // Destroy the popper element
-            console.log('Popper removed:', edgePopper);
-            // Remove the tapped edge from the diagram
-            tappedEdge.remove();
-            console.log('Edge removed:', tappedEdge);
-        }
-
-        // Turn off the event handler after the first edge has been removed
-        cy.off('tap', 'edge', edgeTapHandler);
-    }
-
-    // Attach the event handler to listen for tap events on edges
-    cy.on('tap', 'edge', edgeTapHandler);
-
-}
 
 function removeLatexCode(latexCode, idx) {
     edge_symbolic_label[idx] = '';
 }
 
-// TODO MARK: Make sure branch removals are consistent with the editBranch() logic
-// TODO MARK: make sure floating nodes are also removed
-function tremoveBranch() {
-    console.log("removeBranch is called");
-    let cy = window.cy;
-
-    function edgeTapHandler(evt) {
-        let edge = evt.target;
-        let idx = cy.edges().indexOf(edge);
-
-        // Remove the label for the edge being removed
-        edge_symbolic_label.splice(idx, 1);
-
-        document.getElementById("rmv-branch-btn").disabled = false;
-
-        console.log('edge removed:', edge);
-        cy.off('tap', 'edge', edgeTapHandler);
-        edge.remove(); 
-        reset_mag_labels();
-        console.log("edge_symbolic_label:", edge_symbolic_label);
-
-        // Update the indices in edge_symbolic_label to match the new indices of the remaining edges
-        updateIndicesInSymbolicLabels();
-    }
-
-    // Attach the event listener to edges for click
-    cy.on('tap', 'edge', edgeTapHandler);
-    document.getElementById("rmv-branch-btn").disabled = true;
-
-    // Update cy style and log loading time
-    cy.style().selector('edge').css({ 'content': '' }).update();
-    const time2 = new Date();
-    let time_elapse = (time2 - time1) / 1000;
-    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
-
-    // Function to update the indices in edge_symbolic_label array
-    function updateIndicesInSymbolicLabels() {
-        cy.edges().forEach((edge, i) => {
-            let label = edge_symbolic_label[i];
-            if (label !== undefined) {
-                edge_symbolic_label[i] = label;
-            }
-        });
-    }
-}
 
 // Function to initialize event listeners for edges
 function initializeEdgeHover() {
@@ -1502,65 +1441,7 @@ function updateEdgeInfoPosition(event) {
     edgeInfoElement.style.top = (event.clientY + 15) + 'px';  // Offset to avoid cursor overlap
 }
 
-function removeBranch() {
-    console.log("removeBranch is called");
-    let cy = window.cy;
-    function edgeTapHandler(evt){
-        let edge = evt.target;
-        edge.style('display', 'none');
-        // edge.remove();
-
-        // let idx = cy.edges().indexOf(edge);
-        // edgeToRemove = cy.getElementById(idx);
-        // console.log('idx:', idx);
-        // console.log("edgeToRemove:", edgeToRemove);
-        // edgeToRemove.remove();
-        // edge_symbolic_label[idx] = '';
-        
-        console.log("edge_symbolic_label array:", edge_symbolic_label);
-        // edge_symbolic_label.splice(idx,1); // Remove the latex code for the edge
-        
-        // // Adjust indices for edges after the removed edge
-        // for (let i = idx + 1; i < cy.edges().length; i++) {
-        //     edge_symbolic_label[i - 1] = edge_symbolic_label[i];
-        // }
-        // edge_symbolic_label.pop(); // Remove the last element
-        
-
-        // Construct data for the DELETE request
-        let data = {
-            source: edge.data('source'), // Get source node ID
-            target: edge.data('target')  // Get target node ID
-        };
-
-        console.log("edge id:", edge.id());
-        console.log("edge data:", edge.data());
-
-        // Remove the edge from Cytoscape
-        edge.remove();
-
-        // Update the backend with the removed branch
-        remove_edge_request(data);
-
-        document.getElementById("rmv-branch-btn").disabled = false;
-        
-        console.log('edge (edge id) removed:', edge.id());
-        cy.off('tap', 'edge', edgeTapHandler);
-        console.log("edge_symbolic_label:", edge_symbolic_label);
-        reset_mag_labels();
-    }
-
-    // Attach the event listener to edges for click
-    cy.on('tap', 'edge', edgeTapHandler);
-    document.getElementById("rmv-branch-btn").disabled = true;
-
-    // Update cy style and log loading time
-    cy.style().selector('edge').css({ 'content': '' }).update();
-    const time2 = new Date();
-    let time_elapse = (time2 - time1) / 1000;
-    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
-}
-
+ //TODO:Confirm if function below needs to be removed. (2025/2026) 
 function remove_edge_request(data) {
     console.log('DELETE request payload:', data);  // Log the payload
 
@@ -1983,120 +1864,6 @@ function editBranch() {
     let time_elapse = (time2 - time1) / 1000;
     console.log("editBranch SFG loading time: " + time_elapse + " seconds");
 }
-
-
-
-
-// function qqremoveBranch() {
-//     // Print that this function is called from
-//     console.log("removeBranch is called");
-
-//     let cy = window.cy;
-//     let updates = new Array(cy.edges().length)
-//     let edges = new Array(cy.edges().length)
-
-//     cy.edges().forEach((edge,idx) => {
-//         edge.on('tap', function(evt){
-//             // Remove the edge from the diagram
-//             edge.remove();
-//             console.log('Edge removed:', edge);
-//         });
-//     });
-
-
-//     // Define the event handler to handle tap events on edges
-//     function edgeTapHandler(evt) {
-//         let tappedEdge = evt.target; // Get the tapped edge
-//         console.log('Tapped Edge:', tappedEdge);
-
-//         // Remove the popper element associated with the tapped edge
-//         let edgePopper = tappedEdge.scratch('_popper'); // Retrieve the popper element
-//         if (edgePopper) {
-//             // print edgepopper content
-//             console.log('Edge Popper:', edgePopper);
-//             edgePopper.destroy(); // Destroy the popper element
-//             console.log('Popper removed:', edgePopper);
-//         }
-
-//         // Remove the tapped edge from the diagram
-//         tappedEdge.remove();
-//         console.log('Edge removed:', tappedEdge);
-
-//         //re-render the SFG
-
-
-//         // Turn off the event handler after the first edge has been removed
-//         cy.off('tap', 'edge', edgeTapHandler);
-//     }
-
-//     // Attach the event handler to listen for tap events on edges
-//     cy.on('tap', 'edge', edgeTapHandler);
-
-//     // // Define the event handler to handle remove events on edges
-//     // function edgeRemoveHandler(evt) {
-//     //     let removedEdge = evt.target; // Get the removed edge
-//     //     console.log('Removed Edge:', removedEdge);
-
-//     //     // Remove the popper element associated with the removed edge
-//     //     let edgePopper = removedEdge.scratch('_popper'); // Retrieve the popper element
-//     //     if (edgePopper) {
-//     //         edgePopper.destroy(); // Destroy the popper element
-//     //         console.log('Popper removed:', edgePopper);
-//     //     }
-//     //     cy.off('remove', 'edge', edgeRemoveHandler);
-//     // }
-
-//     // // Attach the event handler to listen for remove events on edges
-//     // cy.on('remove', 'edge', edgeRemoveHandler);
-// }
-
-// // Removes the selected branch from the diagram
-// function primitiveremoveBranch() {
-//     // Print that this function is called from
-//     console.log("removeBranch is called");
-
-//     // Get the edge that is clicked
-//     // function edgeTapHandler(evt) {
-//     //     cy.edges().forEach((edge, idx) => {
-//     //         edge.on('tap', function(evt){
-//     //             // Remove the edge from the diagram
-//     //             edge.remove();
-//     //             console.log('Edge removed:', edge);
-//     //         });
-//     //     });
-//     //     // Turn off the event handler after the first edge has been removed
-//     //     cy.off('tap', 'edge', edgeTapHandler);
-//     // }
-    
-
-//     // Define the event handler to handle tap events on edges
-//     function edgeTapHandler(evt) {
-//         let tappedEdge = evt.target; // Get the tapped edge
-//         console.log('Tapped Edge:', tappedEdge);
-
-//         // Remove the tapped edge from the diagram
-//         tappedEdge.remove();
-//         reset_mag_labels();
-//         console.log('Edge removed:', tappedEdge);
-        
-//         // // Remove the popper element associated with the tapped edge
-//         // let edgePopper = tappedEdge.scratch('_popper');
-//         //     if (edgePopper) {
-//         //     edgePopper.destroy();
-//         //     console.log('Popper removed:', edgePopper);
-//         // }
-
-//         // // Update the edges
-//         // tappedEdge.update();
-
-
-//         // Turn off the event handler after the first edge has been removed
-//         cy.off('tap', 'edge', edgeTapHandler);
-//     }
-
-//     // Attach the event handler to listen for tap events on edges
-//     cy.on('tap', 'edge', edgeTapHandler);
-// }
 
 function  display_mag_sfg() {
     let cy = window.cy;
@@ -4127,6 +3894,8 @@ function sfg_simplification_entire_graph_trivial(params) {
             disable_redo_btn(true);
         }
         stack_len = Math.min(stack_len + 1, 5);
+
+        // Rebuild SFG
         update_frontend(data);
         simplify_mode_toggle();
         reset_mag_labels();
