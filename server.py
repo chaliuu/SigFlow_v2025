@@ -826,24 +826,31 @@ def get_sfg(circuit_id):
 def import_dill_sfg(circuit_id):
     circuit = db.Circuit.objects(id=circuit_id).first()
 
-    if not circuit:
-        loaded_sfg = dill.load(request.files["file"])
-        circuit = db.Circuit.create(
-            circuitId=circuit_id,
-            name=loaded_sfg.name,
-            netlist=loaded_sfg.netlist,
-            schematic=loaded_sfg.schematic,
-            op_point_log=loaded_sfg.op_point_log,
-        )
-        circuit.import_circuit(loaded_sfg)
-        circuit.id = circuit_id
-        circuit.save()
-        fields = request.args.get("fields", type=lambda s: s and s.split(",") or None)
-        return circuit.to_dict(fields)
-
     try:
         loaded_sfg = dill.load(request.files["file"])
+
+        if not circuit:
+            # Only persist the provided id when it is a valid ObjectId, otherwise
+            # let Mongo generate one so imports from arbitrary strings succeed.
+            from bson import ObjectId
+            from bson.errors import InvalidId
+
+            circuit_kwargs = {
+                "name": loaded_sfg.name,
+                "netlist": loaded_sfg.netlist,
+                "schematic": loaded_sfg.schematic,
+                "op_point_log": loaded_sfg.op_point_log,
+            }
+
+            try:
+                circuit_kwargs["circuitId"] = ObjectId(str(circuit_id))
+            except InvalidId:
+                pass
+
+            circuit = db.Circuit.create(**circuit_kwargs)
+
         circuit.import_circuit(loaded_sfg)
+        circuit.id = circuit_id if circuit_id == str(circuit.id) else circuit.id
         circuit.save()
         fields = request.args.get("fields", type=lambda s: s and s.split(",") or None)
 

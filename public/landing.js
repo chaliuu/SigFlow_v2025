@@ -9,6 +9,8 @@ const json = {
     schematic: null
 }
 
+let sfgFile = null;
+
 const form = document.getElementById('uploadForm');
 
 
@@ -83,29 +85,81 @@ form.addEventListener('submit', async function(event) {
     console.log('Uploading circuit');
     console.log(json);
 
+    const hasNetlist = Boolean(json.netlist);
+    const hasSfg = Boolean(sfgFile);
+
+    if (!hasNetlist && !hasSfg) {
+        alert('Please upload a netlist or an SFG file.');
+        return;
+    }
+
     try {
-        const response = await fetch(`${baseUrl}/circuits`,
-        {
-            method: 'POST', // *GET, POST, PUT, DELETE, etc.
-            mode: 'cors', // no-cors, *cors, same-origin
-            cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
-            credentials: 'same-origin', // include, *same-origin, omit
-            headers: {
-            'Content-Type': 'application/json'
-            // 'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            redirect: 'follow', // manual, *follow, error
-            referrerPolicy: 'no-referrer', // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
-            body: JSON.stringify(json) // body data type must match "Content-Type" header
-        });
-        
-        const obj = await response.json();
-        console.log(obj);
-        console.log(`Created circuit with id: ${obj.id}`);
-        sessionStorage.setItem('circuitId', obj.id);
+        let circuitId = null;
+
+        if (!hasNetlist && hasSfg) {
+            const generatedId = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}`;
+            const importUrl = new URL(`${baseUrl}/circuits/${generatedId}/import`);
+            const formData = new FormData();
+            formData.append('file', sfgFile);
+
+            const importResponse = await fetch(importUrl, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!importResponse.ok) {
+                throw new Error('Failed to import SFG');
+            }
+
+            const importedCircuit = await importResponse.json();
+            circuitId = importedCircuit.id || generatedId;
+            console.log(`Imported SFG into circuit with id: ${circuitId}`);
+        } else {
+            const response = await fetch(`${baseUrl}/circuits`,
+            {
+                method: 'POST', // *GET, POST, PUT, DELETE, etc.
+                mode: 'cors', // no-cors, *cors, same-origin
+                cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
+                credentials: 'same-origin', // include, *same-origin, omit
+                headers: {
+                'Content-Type': 'application/json'
+                // 'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                redirect: 'follow', // manual, *follow, error
+                referrerPolicy: 'no-referrer', // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+                body: JSON.stringify(json) // body data type must match "Content-Type" header
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to create circuit');
+            }
+
+            const obj = await response.json();
+            circuitId = obj.id;
+            console.log(obj);
+            console.log(`Created circuit with id: ${circuitId}`);
+
+            if (sfgFile) {
+                const importUrl = new URL(`${baseUrl}/circuits/${circuitId}/import`);
+                const formData = new FormData();
+                formData.append('file', sfgFile);
+
+                const importResponse = await fetch(importUrl, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!importResponse.ok) {
+                    throw new Error('Failed to import SFG');
+                }
+            }
+        }
+
+        sessionStorage.setItem('circuitId', circuitId);
         window.location.replace('./demo.html');
-    } catch {
-        alert('Failed to upload circuit.')
+    } catch (error) {
+        console.error(error);
+        alert('Failed to upload circuit or SFG.')
     }
 })
 
@@ -176,5 +230,10 @@ opPointLogFile.addEventListener('change', event => {
         console.log(`Succesfully read op point log`);
         json.op_point_log = reader.result;
     }
+});
+
+const sfgUpload = document.getElementById('formControlSfgFile');
+sfgUpload.addEventListener('change', event => {
+    sfgFile = event.target.files[0] || null;
 });
     
