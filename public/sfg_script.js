@@ -290,13 +290,13 @@ function getSfgStyles() {
       selector: 'node[name]',
       style: {
         'content': 'data(name)',
-        'font-size': '26px',
-        'text-outline-width': '8',
+        'font-size': '20px',
+        'text-outline-width': '6',
         'text-outline-color': '#E8E8E8',
-        'width': '84px',
-        'height': '84px',
+        'width': '65px',
+        'height': '65px',
         'background-color': '#5aa5ff',
-        'border-width': '4px',
+        'border-width': '3px',
         'border-color': '#4a90e2',
         'background-fill': 'radial-gradient',
         'background-gradient-stop-colors': '#ffffff #5aa5ff',
@@ -305,7 +305,7 @@ function getSfgStyles() {
         'shadow-color': '#2d5aa0',
         'shadow-opacity': 0.25,
         'shadow-offset-x': 0,
-        'shadow-offset-y': 4,
+        'shadow-offset-y': 3,
         'text-valign': 'center',
         'text-halign': 'center'
       }
