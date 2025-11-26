@@ -27,6 +27,37 @@ _si_prefix = {
     'Y': 1e24,   # yotta
 }
 
+special_prefixes = (
+    'PULSE',      # Pulse waveform
+    'SINE',       # Sinusoidal waveform
+    'SIN',        # Alternate syntax for SINE
+    'PWL',        # Piecewise Linear
+    'EXP',        # Exponential
+    'SFFM',       # Single Frequency FM
+    'AC',         # AC analysis source
+    'DC',         # Explicit DC (when combined with AC, e.g., "DC 5 AC 1")
+    'TRAN',       # Transient specification
+    'COS',        # Cosine (some SPICE variants)
+    'TAN',        # Tangent (some SPICE variants)
+    'NOISE',      # Noise source
+    'RAND',       # Random source
+    'TABLE',      # Table-based source
+    'VALUE',      # Behavioral voltage/current
+    'POLY',       # Polynomial source
+    'LAPLACE',    # Laplace transform source
+    'FREQ',       # Frequency-dependent source
+    'CHEBYSHEV',  # Chebyshev filter source
+    'BANDPASS',   # Bandpass filter source
+    'BANDREJECT', # Bandreject filter source  
+    'HIGHPASS',   # Highpass filter source
+    'LOWPASS',    # Lowpass filter source
+    'DELAY',      # Delayed source
+    'EXTERNAL',   # External file source
+    'WAVEFILE',   # WAV file source
+    'PRBS',       # Pseudo-random binary sequence
+    'MODULATE',   # Modulated source
+)
+
 
 def si_prefix_to_float(s) -> float:
     """Converts a string ending in an SI prefix to a float.
@@ -165,26 +196,56 @@ class VoltageSource(Component, TwoTerminal):
     def __init__(self, name: str,
                  pos_node: str,
                  neg_node: str,
-                 voltage: Union[str, float]):
+                 voltage: Union[str, float],
+                 is_dc: bool=True):
 
         Component.__init__(self, name)
         TwoTerminal.__init__(self, pos_node, neg_node)
         self.voltage = voltage
-
-    def is_dc(self) -> bool:
-        return isinstance(self.voltage, float)
+        self.is_dc = is_dc
 
     @classmethod
     def from_netlist_entry(cls, entry: str) -> 'VoltageSource':
         name, pos_node, neg_node, voltage = entry.split(' ', 3)
 
         # A numeric voltage value is interpreted as DC.
+        is_dc_flag = True # local variable flag to track DC status
         try:
-            voltage = si_prefix_to_float(voltage)
+            voltage = cls._parse_voltage_value(voltage)
         except ValueError:
+            is_dc_flag = False # if ValueError returned then _parse_voltage_value found a non-DC voltage values
             pass
 
-        return VoltageSource(name, pos_node, neg_node, voltage)
+        return VoltageSource(name, pos_node, neg_node, voltage, is_dc_flag)
+
+    @staticmethod
+    def _parse_voltage_value(voltage_str: str) -> Union[float, str]:
+        """Parse voltage value, handling unit suffixes like 'V' and
+        
+        Args:
+            voltage_str: The voltage string to parse.
+            
+        Returns:
+            A float if the value is numeric (DC), otherwise the original string.
+            
+        Raises:
+            ValueError: If the value cannot be parsed as a numeric DC value.
+        """
+        voltage_str = voltage_str.strip()
+        
+        # Check if it's a special source type
+        for prefix in special_prefixes:
+            if voltage_str.upper().startswith(prefix):
+                raise ValueError("Non-DC source") # found non-DC voltage values
+        
+        # Remove trailing 'V' or 'v' if present (voltage unit)
+        if voltage_str.upper().endswith('V'):
+            # Check it's not just 'V' and the character before is a digit
+            if len(voltage_str) > 1 and (voltage_str[-2].isdigit() or voltage_str[-2] == '.'):
+                voltage_str = voltage_str[:-1]
+        
+        # Try to parse with SI prefix
+        return si_prefix_to_float(voltage_str)
 
     def to_netlist_entry(self) -> str:
         args = (self.name, self.pos_node, self.neg_node, self.voltage)
@@ -202,26 +263,55 @@ class CurrentSource(Component, TwoTerminal):
     def __init__(self, name: str,
                  pos_node: str,
                  neg_node: str,
-                 current: Union[str, float]):
+                 current: Union[str, float],
+                 is_dc: bool = True):
 
         Component.__init__(self, name)
         TwoTerminal.__init__(self, pos_node, neg_node)
         self.current = current
-
-    def is_dc(self) -> bool:
-        return isinstance(self.current, float)
+        self.is_dc = is_dc
 
     @classmethod
     def from_netlist_entry(cls, entry: str) -> 'CurrentSource':
         name, pos_node, neg_node, current = entry.split(' ', 3)
 
-        # A numeric voltage value is interpreted as DC.
+        # A numeric current value is interpreted as DC.
+        is_dc_flag = True # local variable flag to track DC status
         try:
-            current = si_prefix_to_float(current)
+            current = cls._parse_current_value(current)
         except ValueError:
-            pass
+            is_dc_flag = False # if ValueError returned then _parse_current_value found a non-DC current values
 
-        return CurrentSource(name, pos_node, neg_node, current)
+        return CurrentSource(name, pos_node, neg_node, current, is_dc_flag)
+
+    @staticmethod
+    def _parse_current_value(current_str: str) -> Union[float, str]:
+        """Parse current value, handling unit suffixes like 'A'.
+        
+        Args:
+            current_str: The current string to parse.
+            
+        Returns:
+            A float if the value is numeric (DC), otherwise the original string.
+            
+        Raises:
+            ValueError: If the value cannot be parsed as a numeric DC value.
+        """
+        current_str = current_str.strip()
+        
+        # Check if it's a special source type 
+        for prefix in special_prefixes:
+            if current_str.upper().startswith(prefix):
+                raise ValueError("Non-DC source") # found non-DC current values
+        
+        # Remove trailing 'A' or 'a' if present (current unit)
+        if current_str.upper().endswith('A'):
+            # Check it's not just 'A' and the character before is a digit
+            if len(current_str) > 1 and (current_str[-2].isdigit() or current_str[-2] == '.'):
+                current_str = current_str[:-1]
+        
+        # Try to parse with SI prefix
+        return si_prefix_to_float(current_str)
 
     def to_netlist_entry(self) -> str:
         args = (self.name, self.pos_node, self.neg_node, self.current)
@@ -654,7 +744,7 @@ class Circuit:
 
                 # Mark DC sources to be turned off later.
                 if (isinstance(component, (VoltageSource, CurrentSource)) and
-                        component.is_dc()):
+                        component.is_dc):
                     dc_sources.append(component)
 
             elif isinstance(component, BipolarTransistor):
@@ -685,29 +775,27 @@ class Circuit:
             return Circuit(graph)
 
         for source in dc_sources:
-            print("#################################################### SOURCES: ",source)
+            print("DC source being processed is: ",source)
             if isinstance(source, VoltageSource):
-                print("#################################################### isInstance", source)
                 pos_node = source.pos_node
                 neg_node = source.neg_node
-                print("#################################################### pos_node, neg_node", pos_node, neg_node)
                 # Skip if source is already shorted
                 if pos_node == neg_node:
                     if graph.has_edge(pos_node, neg_node, source.name):
-                        print(f"############Warning: Voltage source {source.name} is already shorted")
+                        print(f"Info: Voltage source {source.name} is already shorted")
                         graph.remove_edge(pos_node, neg_node, source.name)
                     continue
                 
                 # Determine which node to keep (prefer ground node '0')
                 if neg_node == '0':
-                    print("#################################################### neg_node is 0")
+                    print("Info: neg_node is grounded")
                     keep_node, merge_node = neg_node, pos_node
                 elif pos_node == '0':
-                    print("#################################################### pos_node is 0")
+                    print("Info: pos_node is grounded")
                     keep_node, merge_node = pos_node, neg_node
                 else:
                     # If neither is ground, keep the lexicographically smaller one
-                    print("#################################################### neither is 0")
+                    print("Info: Neither pos_node nor neg_node is grounded")
                     keep_node, merge_node = (pos_node, neg_node) if pos_node < neg_node else (neg_node, pos_node)
                 
                 # Add alias tracking
@@ -715,7 +803,7 @@ class Circuit:
                 
                 # Remove the DC voltage source edge FIRST before collecting other edges
                 if graph.has_edge(pos_node, neg_node, source.name):
-                    print("#################################################### Removing DC voltage source edge:", pos_node, neg_node, source.name)
+                    print("Info: Removing DC voltage source edge ", pos_node, neg_node, source.name)
                     graph.remove_edge(pos_node, neg_node, source.name)
                 
                 # Update ALL components in the graph that reference the merge_node
@@ -771,16 +859,16 @@ class Circuit:
                 # DC current sources become open circuits in small signal analysis
                 if graph.has_edge(source.pos_node, source.neg_node, source.name):
                     graph.remove_edge(source.pos_node, source.neg_node, source.name)
-                    print(f"Removed DC current source {source.name}")
+                    print(f"Info: Removed DC current source {source.name}")
 
         # Clean up any isolated nodes that may have been created
         isolated_nodes = [node for node in list(graph.nodes()) if graph.degree(node) == 0]
         graph.remove_nodes_from(isolated_nodes)
         if isolated_nodes:
-            print(f"Removed isolated nodes: {isolated_nodes}")
+            print(f"Info: Removed isolated nodes {isolated_nodes}")
 
         # Print the entire graph for debugging
-        print("################# Final graph nodes and edges:")
+        print("########## Final graph nodes and edges: ##########")
         for node in graph.nodes(data=True):
             print(f"Node: {node}")
         for u, v, key, data in graph.edges(keys=True, data=True):
