@@ -217,19 +217,48 @@ const opPointLogFile = document.getElementById('formControlOpLogFile');
 opPointLogFile.addEventListener('change', event => {
     const file = event.target.files[0];
 
+    //Read as ArrayBuffer first to detect encoding
     const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
 
-    reader.readAsText(file, 'utf-8');
-
-    reader.onerror = function(event) {
+    reader.onerror = function(event) 
+    {
         alert("Failed to read file!\n\n" + reader.error);
-        reader.abort(); // (...does this do anything useful in an onerror handler?)
-      };
+        reader.abort();
+    };
 
     reader.onload = () => {
-        console.log(`Succesfully read op point log`);
-        json.op_point_log = reader.result;
-    }
+        const buffer = reader.result;
+        const bytes = new Uint8Array(buffer);
+        
+        let text;
+        const hasUtf16LeBom = bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE;
+        const hasUtf16BeBom = bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF;
+        const looksLikeUtf16Le = bytes.length >= 4 && bytes[1] === 0x00 && bytes[3] === 0x00;
+        
+        if (hasUtf16LeBom || looksLikeUtf16Le) 
+        {
+            //UTF-16 Little Endian
+            const decoder = new TextDecoder('utf-16le');
+            text = decoder.decode(buffer);
+            console.log('Detected UTF-16 LE encoding for .log file');
+        } else if (hasUtf16BeBom) 
+        {
+            //UTF-16 Big Endian
+            const decoder = new TextDecoder('utf-16be');
+            text = decoder.decode(buffer);
+            console.log('Detected UTF-16 BE encoding for .log file');
+        } else 
+        {
+            //Default to UTF-8
+            const decoder = new TextDecoder('utf-8');
+            text = decoder.decode(buffer);
+            console.log('Using UTF-8 encoding for .log file');
+        }
+        
+        console.log(`Successfully read .log file`);
+        json.op_point_log = text;
+    };
 });
 
 const sfgUpload = document.getElementById('formControlSfgFile');
