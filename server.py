@@ -130,6 +130,19 @@ def update_edge_new(circuit_id):
     if not input_node or not output_node or not symbolic:
         abort(400, description="Missing source, target, or symbolic data")
 
+
+    fields = request.args.get("fields", type=lambda s: s and s.split(","))
+
+
+    circuit_dict = circuit.to_dict(fields)
+    params = circuit_dict.get("parameters", {})
+    if symbolic not in params:
+        print("User inputted invalid edge value in update_edge_new:", symbolic)
+        #abort(400, description=f"Invalid parameter '{symbolic}'. Must be one of: {', '.join(params.keys())}")
+        return jsonify(error=f"Invalid input '{symbolic}'"), 400
+
+
+    
     try:
         print("Attempting to edit edge with the following data:")
         print(f"Source: {input_node}, Target: {output_node}, Symbolic: {symbolic}")
@@ -143,123 +156,15 @@ def update_edge_new(circuit_id):
         circuit.save()
         print("Circuit saved successfully")
 
-        fields = request.args.get("fields", type=lambda s: s and s.split(",") or None)
+        fields = request.args.get("fields", type=lambda s: s and s.split(","))
+        circuit_dict = circuit.to_dict(fields)
         # print fields
         print("fields: " + str(fields))
-        print(circuit.to_dict(fields))
-        return circuit.to_dict(fields)
+        print(circuit_dict)
+        return circuit_dict
 
     except Exception as e:
         abort(400, description=str(e))
-
-
-# @app.route('/circuits/<circuit_id>/edges', methods=['DELETE'])
-# def remove_edge(circuit_id):
-#     circuit = db.Circuit.objects(id=circuit_id).first()
-#     if not circuit:
-#         abort(404, description='Circuit not found')
-
-#     try:
-#         print("trying remove_edge server side")
-#         print("request: " + str(request))
-#         data = request.get_json()
-#         source = data.get('source')
-#         target = data.get('target')
-
-#         # Validate the data
-#         if not source or not target:
-#             raise ValueError('Invalid parameters.')
-
-#         # print all edges of circuit
-#         print("circuit edges: " + str(circuit.edges))
-#         # get edge from circuit
-#         edge = circuit.get_edge(source, target)
-#         print("edge: " + str(edge))
-
-#         # # Deserialize the SFG
-#         # sfg = dill.loads(circuit.sfg)
-
-#         # # Remove the specified edge
-#         # if sfg.has_edge(source, target):
-#         #     sfg.remove_edge(source, target)
-#         # else:
-#         #     raise ValueError('Edge not found in the graph.')
-
-#         # # Serialize the updated SFG back to the binary field
-#         # circuit.sfg = dill.dumps(sfg)
-#         # circuit.save()
-
-#         # # Fetch the updated SFG elements
-#         # updated_sfg_elements = {
-#         #     'nodes': [{'data': {'id': node, 'name': node}} for node in sfg.nodes],
-#         #     'edges': []
-#         # }
-#         # for src, dst in sfg.edges:
-#         #     weight = sfg.edges[src, dst]['weight']
-#         #     symbolic = weight['symbolic']
-#         #     if isinstance(symbolic, sympy.Basic):
-#         #         symbolic = sympy.latex(symbolic)
-#         #     updated_sfg_elements['edges'].append({
-#         #         'data': {
-#         #             'id': f'{src}_{dst}',
-#         #             'source': src,
-#         #             'target': dst,
-#         #             'weight': {
-#         #                 'symbolic': symbolic,
-#         #                 'magnitude': weight['magnitude'],
-#         #                 'phase': weight['phase']
-#         #             }
-#         #         }
-#         #     })
-
-#         # # unimplemented edge removal logic
-#         # # # Logic to remove the edge from the database
-#         # # # Example: Circuit.objects.filter(id=circuit_id).update(pull__edges={'source': source, 'target': target})
-#         # # Logic to remove the edge from the database
-#         # # Assuming your edge structure is like {'source': 'node1', 'target': 'node2'}
-#         # circuit.update(pull__edges={'source': source, 'target': target})
-
-#         # # Fetch the updated circuit
-#         # circuit.reload()
-
-#         # # Extract the updated SFG elements
-#         # updated_sfg_elements = {
-#         #     'nodes': [{'data': node.to_dict()} for node in circuit.nodes],
-#         #     'edges': [{'data': edge.to_dict()} for edge in circuit.edges]
-#         # }
-
-#         # # # Simulate the updated SFG elements to send back to the frontend
-#         # # updated_sfg_elements = {
-#         # #     'nodes': [],  # Add your updated nodes here
-#         # #     'edges': []   # Add your updated edges here
-#         # # }
-
-#         # # # return jsonify({"message": "Edge removed successfully", "sfg": {"elements": updated_sfg_elements}}), 200
-
-
-#         # existing response update logic
-#         fields = request.args.get(
-#             'fields',
-#             type=lambda s: s and s.split(',') or None
-#         )
-
-#         # print fields
-#         # print("fields: " + str(fields))
-#         # print(circuit.to_dict(fields))
-
-#         return circuit.to_dict(fields)
-#         # return jsonify({
-#         #     "message": "Edge removed successfully",
-#         #     "sfg": {"elements": updated_sfg_elements}
-#         # }), 200
-
-#     except ValueError as e:
-#         app.logger.error(f"ValueError: {e}")
-#         return jsonify({"error": str(e)}), 400  # Return 400 Bad Request for client-side errors
-#     except Exception as e:
-#         app.logger.error(f"Error removing edge in circuit {circuit_id}: {e}")
-#         return jsonify({"error": "Internal Server Error"}), 500
-
 
 # note to self: remove_edge is old
 # remove_branch is new and uses similar logic to simplify_circuit
@@ -320,36 +225,7 @@ def get_edge_info(circuit_id):
         print("fields: " + str(fields))
         print(circuit.to_dict(fields))
 
-        # for edge in circuit.sfg.elements.edges:
-        #     print("iterating edge", circuit.sfg.elements.edges[edge])
-        # print("-----first edge", circuit.to_dict(fields))
-
-        # print("before edge = next(..........)")
-        # edge = "test"
-        # Find the edge with the matching source and target
-        # for e in circuit.sfg.elements['edges']:
-        #     if e['data']['source'] == source and e['data']['target'] == target:
-        #         edge = e
-        #         break
-
-        # print("edge:", edge)
-        # edge = next(
-        #     (edge for edge in circuit.sfg['elements']['edges']
-        #      if edge['data']['source'] == source and edge['data']['target'] == target), None
-        # )
-        # edge = next((edge for edge in circuit.sfg['elements']['edges'] if edge['data']['source'] == source and edge['data']['target'] == target), None)
-        # print("edge: " + str(edge))
-
-        # if not edge:
-        #     print("edge not found")
-        #     return jsonify(error="Edge not found"), 404
-
-        # weight = edge['data']['weight']
-        # print("weight: " + str(weight))
-
-        # Finally specify the application/JSON format for the response to prevent 400 Error Bad Request
-        # response = jsonify(weight)
-
+        
         circuit_data = circuit.to_dict(fields)
 
         # Extracting the list of edges

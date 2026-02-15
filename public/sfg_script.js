@@ -1358,6 +1358,21 @@ function openEditModal(data) {
     var magnitudeDisplay = document.getElementById("magnitude-value");
     var phaseDisplay = document.getElementById("phase-value");
 
+    // ✅ ADD: error display helper (make sure your HTML has <div id="edge-edit-error"></div>)
+    function setEdgeEditError(msg) {
+        const el = document.getElementById("edge-edit-error");
+        if (!el) {
+            console.warn("Missing #edge-edit-error element in DOM");
+            return;
+        }
+        el.textContent = msg || "";
+        el.style.display = msg ? "block" : "none";
+    }
+
+    // ✅ ADD: clear any previous error when opening
+    setEdgeEditError("");
+
+
     console.log('Data:', data);
 
     // Populate the input fields with data
@@ -1405,9 +1420,19 @@ function openEditModal(data) {
         console.log('tgt:', data.data.target);
         console.log('symbolic:', data.data.weight.symbolic);
 
-        new_editBranchLikeSimplify(data.data.source, data.data.target, data.data.weight.symbolic);
+        // ✅ Clear any previous error before attempting update
+        setEdgeEditError("");
 
-        modal.style.display = "none";
+        // ✅ Call server and close only on success; show message on error
+        new_editBranchLikeSimplify(data.data.source, data.data.target, data.data.weight.symbolic)
+            .then(() => {
+                modal.style.display = "none";   // close only if PATCH succeeded
+            })
+            .catch((err) => {
+                setEdgeEditError(err.message);  // show backend error like "Invalid input 'R_{2}'"
+                console.log("Setting edge-edit-error to:", err.message);
+            });
+
     };
 }
 
@@ -1456,15 +1481,7 @@ function new_editBranchLikeSimplify(source, target, symbolic) {
     form_data.symbolic = symbolic;
     console.log("form_data:", form_data);
 
-    update_edge_new(form_data);
-
-    // reset_mag_labels();
-
-    // Update cy style and log loading time
-    // cy.style().selector('edge').css({ 'content': '' }).update();
-    const time2 = new Date();
-    let time_elapse = (time2 - time1) / 1000;
-    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
+    return update_edge_new(form_data);
 }
 
 
@@ -1976,39 +1993,42 @@ function make_transfer_func_panel() {
 }
 
 function update_edge_new(params) {
-    console.log("********** running update_edge_new **********")
-    var url = new URL(`${baseUrl}/circuits/${circuitId}/update_edge_new`);
-    // var url = `${baseUrl}/circuits/${circuitId}/update_edge_new`;
-    
-    console.log("Final URL with parameters:", url.href);
-    console.log("sending PATCH request to:", url);
+  console.log("********** running update_edge_new **********");
+  const url = new URL(`${baseUrl}/circuits/${circuitId}/update_edge_new`);
 
-    fetch(url, {
-        method: 'PATCH',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        mode: 'cors',
-        credentials: 'same-origin',
-        body: JSON.stringify(params)
-    })
-    .then(response => {
-        if (!response.ok) {
-            // If response is not ok (i.e., in error status range), reject the promise
-            throw new Error(`HTTP error! Status: ${response.status}`);
-        }
-        // If response is ok, return JSON promise
-        return response.json();
-    })
-    .then(data => {
-        console.log("success!");
-        update_frontend(data);
-        reset_mag_labels();
-    })
-    .catch(error => {
-        console.error('update_edge error!:', error);
-        console.log('update_edge Full response:', error.response);
-    });
+  console.log("sending PATCH request to:", url.href);
+
+  // ✅ RETURN the fetch promise so callers can .then/.catch it
+  return fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    mode: "cors",
+    credentials: "same-origin",
+    body: JSON.stringify(params),
+  }).then(async (response) => {
+    // ✅ Always read the body (even on error)
+    let payload = null;
+    try {
+      payload = await response.json(); // backend returns JSON for errors too
+    } catch (e) {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      // ✅ Use backend message if present
+      const msg =
+        (payload && (payload.error || payload.message)) ||
+        `HTTP error! Status: ${response.status}`;
+
+      throw new Error(msg);
+    }
+
+    // ✅ success
+    console.log("success!");
+    update_frontend(payload);
+    reset_mag_labels();
+    return payload;
+  });
 }
 
 async function tf_toggle() {
@@ -4485,4 +4505,83 @@ function autoRelocateIVNodesPrefix({
 
   // 4) Move the nodes
   relocateSfgNodesToSvg({ rows, animate, duration });
+}
+
+function getAllowedSymbols(parametersObj) {
+  // parameters: { R2: ..., C1: ..., gm1: ... }
+  const base = new Set(Object.keys(parametersObj || {}));
+  base.add("s"); // if you allow Laplace variable
+  return base;
+}
+
+function normalizeSymbolicInput(raw, allowedSymbols) {
+  if (raw == null) return { ok: false, error: "Empty input" };
+
+  let s = String(raw).trim();
+
+  // 1) basic unicode/operator normalization
+  s = s
+    .replace(/[−–—]/g, "-")
+    .replace(/[×·]/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/\s+/g, " ");
+
+  // 2) strip common LaTeX wrappers
+  s = s
+    .replace(/\\left/g, "")
+    .replace(/\\right/g, "")
+    .replace(/\\cdot/g, "*");
+
+  // 3) convert \frac{a}{b} -> (a)/(b) (simple recursive loop)
+  // NOTE: this handles nested braces in a basic way; good enough for typical inputs.
+  while (/\\frac\s*\{/.test(s)) {
+    s = s.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
+    // If user has nested braces inside frac parts, this won't fully parse.
+    // That's OK for v1: the backend will reject and user can simplify input.
+    break;
+  }
+
+  // 4) subscripts: X_{2} or X_2 -> X2
+  // - First handle braces
+  s = s.replace(/([A-Za-z]+)_\{([A-Za-z0-9]+)\}/g, "$1$2");
+  // - Then handle single token
+  s = s.replace(/([A-Za-z]+)_([A-Za-z0-9]+)/g, "$1$2");
+
+  // 5) remove leftover LaTeX backslashes
+  s = s.replace(/\\/g, "");
+
+  // 6) quick reject illegal characters after normalization
+  if (/[{};=]/.test(s)) {
+    return { ok: false, error: "Invalid characters in expression." };
+  }
+
+  // 7) tokenize
+  const tokens = s.match(/[A-Za-z][A-Za-z0-9]*|\d*\.\d+|\d+|[()+\-*/^]/g);
+  if (!tokens || tokens.join("") !== s.replace(/\s+/g, "")) {
+    // allow spaces, so compare after removing them
+    const compact = s.replace(/\s+/g, "");
+    const joined = (tokens || []).join("");
+    if (joined !== compact) {
+      return { ok: false, error: "Could not parse expression." };
+    }
+  }
+
+  // 8) validate identifiers + parentheses balance
+  let depth = 0;
+  for (const t of tokens) {
+    if (t === "(") depth++;
+    if (t === ")") depth--;
+    if (depth < 0) return { ok: false, error: "Unbalanced parentheses." };
+
+    if (/^[A-Za-z]/.test(t)) {
+      if (!allowedSymbols.has(t)) {
+        return { ok: false, error: `Unknown symbol: ${t}` };
+      }
+    }
+  }
+  if (depth !== 0) return { ok: false, error: "Unbalanced parentheses." };
+
+  // 9) return canonical (no spaces)
+  const canonical = tokens.join("");
+  return { ok: true, canonical };
 }
