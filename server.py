@@ -35,6 +35,33 @@ def serve_webpage(path):
     return send_from_directory("public", path)
 
 
+# ── React SPA serving from frontend/dist/ ──
+import os
+
+REACT_BUILD = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_react(path):
+    """Serve the React SPA. Falls through to index.html for client-side routing."""
+    # Don't intercept API routes or legacy /app routes
+    if path.startswith("circuits") or path.startswith("app/"):
+        abort(404)
+
+    full_path = os.path.join(REACT_BUILD, path)
+    if path and os.path.isfile(full_path):
+        return send_from_directory(REACT_BUILD, path)
+
+    # Client-side routing: serve index.html for all non-file paths
+    index_path = os.path.join(REACT_BUILD, "index.html")
+    if os.path.isfile(index_path):
+        return send_from_directory(REACT_BUILD, "index.html")
+
+    # Fallback: if no build yet, serve old frontend
+    return send_from_directory("public", "landing.html")
+
+
 @app.route("/circuits/<circuit_id>", methods=["GET"])
 def get_circuit(circuit_id):
     circuit = db.Circuit.objects(id=circuit_id).first()

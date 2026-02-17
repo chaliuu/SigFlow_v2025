@@ -1,0 +1,12 @@
+.overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: var(--z-overlay);
+    overflow: hidden;
+}
+
+.overlay :global(svg) {
+    width: 100%;
+    height: 100%;
+}

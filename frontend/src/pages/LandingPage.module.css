@@ -1,0 +1,226 @@
+.page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    padding: var(--space-lg);
+}
+
+/* Background glow effects */
+.bgGlow {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.12) 0%, transparent 70%);
+    top: -200px;
+    right: -100px;
+    pointer-events: none;
+}
+
+.bgGlow2 {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.1) 0%, transparent 70%);
+    bottom: -150px;
+    left: -100px;
+    pointer-events: none;
+}
+
+/* Card */
+.card {
+    background: var(--color-bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-2xl);
+    width: 100%;
+    max-width: 560px;
+    position: relative;
+    z-index: 1;
+}
+
+/* Logo */
+.logoSection {
+    text-align: center;
+    margin-bottom: var(--space-xl);
+}
+
+.logo {
+    font-size: 2.8rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin-bottom: var(--space-sm);
+}
+
+.logoAccent {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.tagline {
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+/* Form */
+.form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+/* Dropzone */
+.dropzone {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-bg-tertiary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    overflow: hidden;
+}
+
+.dropzone:hover {
+    border-color: var(--color-accent-blue);
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.dropzoneActive {
+    border-color: var(--color-accent-blue) !important;
+    background: rgba(59, 130, 246, 0.1) !important;
+    box-shadow: var(--shadow-glow-blue);
+}
+
+.dropzoneFilled {
+    border-color: var(--color-accent-emerald);
+    border-style: solid;
+    background: rgba(16, 185, 129, 0.05);
+}
+
+.dropzoneIcon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.dropzoneContent {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.dropzoneLabel {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--color-text-primary);
+}
+
+.dropzoneHint {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+.dropzoneStatus {
+    font-size: 0.78rem;
+    color: var(--color-accent-emerald);
+    font-weight: 500;
+}
+
+.fileInput {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* Error */
+.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm) var(--space-md);
+    color: var(--color-accent-red);
+    font-size: 0.85rem;
+}
+
+/* Actions */
+.actions {
+    display: flex;
+    gap: var(--space-md);
+    padding-top: var(--space-sm);
+}
+
+.actions .btn-primary {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+}
+
+/* Spinner */
+.spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Tutorial */
+.tutorialText {
+    color: var(--color-text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: var(--space-lg);
+}
+
+.tutorialNav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.stepIndicator {
+    display: flex;
+    gap: 6px;
+}
+
+.stepDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-bg-elevated);
+    transition: all var(--transition-fast);
+}
+
+.stepDotActive {
+    background: var(--color-accent-blue);
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+}
+
+.tutorialButtons {
+    display: flex;
+    gap: var(--space-sm);
+}
