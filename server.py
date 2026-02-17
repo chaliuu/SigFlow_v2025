@@ -57,6 +57,19 @@ def create_circuit():
     schematic = request.json.get("schematic")
     op_point_log = request.json.get("op_point_log")
 
+    # Debug statements for visibility
+    if schematic:
+        print(f"DEBUG: Schematic length: {len(schematic)}")
+        print(f"DEBUG: Schematic first 100 chars: {repr(schematic[:100])}")
+    else:
+        print("DEBUG: schematic is None or empty")
+    
+    if op_point_log:
+        print(f"DEBUG: Operating Point Analysis Log File length: {len(op_point_log)}")
+        print(f"DEBUG: Operating Point Analysis Log File first 100 chars: {repr(op_point_log[:100])}")
+    else:
+        print("DEBUG: op_point_log is None or empty")
+
     try:
         circuit = db.Circuit.create(name, netlist, schematic, op_point_log)
     except Exception as e:
