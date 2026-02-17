@@ -26,35 +26,47 @@ export interface ParsedElements {
 
 /**
  * Parse backend SFG JSON into Cytoscape elements array.
- * Mirrors the old `edge_helper()` function.
+ * The backend returns nx.cytoscape_data(sfg) which nests nodes/edges
+ * under an `elements` key, and edge weight data is a sub-object.
  */
 export function parseGraphElements(
     sfgData: CytoscapeElements,
     useSymbolic = true
 ): ParsedElements {
-    const nodes = (sfgData.nodes || []).map((n) => ({
+    const raw = sfgData.elements ?? sfgData;
+    const rawNodes = (raw as { nodes?: Array<{ data: Record<string, unknown> }> }).nodes ?? [];
+    const rawEdges = (raw as { edges?: Array<{ data: Record<string, unknown> }> }).edges ?? [];
+
+    const nodes = rawNodes.map((n) => ({
         data: {
             id: String(n.data.id ?? ''),
-            label: String(n.data.label ?? n.data.id ?? ''),
+            label: String(n.data.name ?? n.data.label ?? n.data.id ?? ''),
         },
     }));
 
-    const edges = (sfgData.edges || []).map((e) => {
+    const edges = rawEdges.map((e, idx) => {
         const d = e.data;
-        const symbolic = String(d.symbolic ?? d.weight ?? '');
-        const magnitude = Number(d.magnitude ?? d.weight ?? 0);
+        // Weight may be an object { symbolic, magnitude, phase } or a primitive
+        const w = (typeof d.weight === 'object' && d.weight !== null)
+            ? d.weight as Record<string, unknown>
+            : null;
+
+        const symbolic = String(w?.symbolic ?? d.symbolic ?? d.weight ?? '');
+        const magnitude = Number(w?.magnitude ?? d.magnitude ?? d.weight ?? 0);
+        const phase = Number(w?.phase ?? d.phase ?? 0);
         const label = useSymbolic ? symbolic : expo(magnitude, 4);
+
         return {
             data: {
-                id: String(d.id ?? `${d.source}-${d.target}`),
+                id: String(d.id ?? `e${idx}-${d.source}-${d.target}`),
                 source: String(d.source ?? ''),
                 target: String(d.target ?? ''),
                 label,
-                weight: Number(d.weight ?? 0),
+                weight: magnitude,
                 symbolic,
                 magnitude,
-                phase: Number(d.phase ?? 0),
-                index: Number(d.index ?? 0),
+                phase,
+                index: Number(d.index ?? idx),
             },
         };
     });

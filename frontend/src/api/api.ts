@@ -49,8 +49,11 @@ export interface CircuitData {
 }
 
 export interface CytoscapeElements {
-    nodes: Array<{ data: Record<string, unknown> }>;
-    edges: Array<{ data: Record<string, unknown> }>;
+    elements: {
+        nodes: Array<{ data: Record<string, unknown> }>;
+        edges: Array<{ data: Record<string, unknown> }>;
+    };
+    [key: string]: unknown;
 }
 
 export interface BodeData {
@@ -116,8 +119,8 @@ export async function updateEdge(
     data: { source: string; target: string; symbolic: string; index?: number }
 ): Promise<CircuitData> {
     return request<CircuitData>(
-        `${BASE_URL}/circuits/${circuitId}/edge${qs(data as Record<string, string | number>)}`,
-        { method: 'PUT' }
+        `${BASE_URL}/circuits/${circuitId}/update_edge_new`,
+        { method: 'PATCH', body: JSON.stringify(data) }
     );
 }
 
@@ -135,8 +138,8 @@ export async function removeBranch(
     data: { source: string; target: string; index?: number }
 ): Promise<CircuitData> {
     return request<CircuitData>(
-        `${BASE_URL}/circuits/${circuitId}/branch${qs(data as Record<string, string | number>)}`,
-        { method: 'DELETE' }
+        `${BASE_URL}/circuits/${circuitId}/remove_branch`,
+        { method: 'PATCH', body: JSON.stringify(data) }
     );
 }
 
@@ -165,7 +168,16 @@ export async function getTransferFunctionBode(
     }
 ): Promise<BodeData> {
     return request<BodeData>(
-        `${BASE_URL}/circuits/${circuitId}/transfer_function/bode${qs(params as Record<string, string | number>)}`
+        `${BASE_URL}/circuits/${circuitId}/transfer_function/bode${qs({
+            input_node: params.input_node,
+            output_node: params.output_node,
+            start_freq_hz: params.start_freq,
+            end_freq_hz: params.end_freq,
+            points_per_decade: params.points_per_decade,
+            frequency_unit: params.frequency_unit,
+            gain_unit: params.gain_unit,
+            phase_unit: params.phase_unit,
+        })}`
     );
 }
 
@@ -192,7 +204,14 @@ export async function getLoopGainBode(
     }
 ): Promise<BodeData> {
     return request<BodeData>(
-        `${BASE_URL}/circuits/${circuitId}/loop_gain/bode${qs(params as Record<string, string | number>)}`
+        `${BASE_URL}/circuits/${circuitId}/loop_gain/bode${qs({
+            start_freq_hz: params.start_freq,
+            end_freq_hz: params.end_freq,
+            points_per_decade: params.points_per_decade,
+            frequency_unit: params.frequency_unit,
+            gain_unit: params.gain_unit,
+            phase_unit: params.phase_unit,
+        })}`
     );
 }
 
@@ -203,22 +222,22 @@ export async function simplifyCircuit(
     data: { source: string; target: string }
 ): Promise<CircuitData> {
     return request<CircuitData>(
-        `${BASE_URL}/circuits/${circuitId}/simplify${qs(data)}`,
-        { method: 'POST' }
+        `${BASE_URL}/circuits/${circuitId}/simplify`,
+        { method: 'PATCH', body: JSON.stringify(data) }
     );
 }
 
 export async function simplifyEntireGraph(circuitId: string): Promise<CircuitData> {
     return request<CircuitData>(
-        `${BASE_URL}/circuits/${circuitId}/simplify_all`,
-        { method: 'POST' }
+        `${BASE_URL}/circuits/${circuitId}/simplification`,
+        { method: 'PATCH' }
     );
 }
 
 export async function simplifyEntireGraphTrivial(circuitId: string): Promise<CircuitData> {
     return request<CircuitData>(
-        `${BASE_URL}/circuits/${circuitId}/simplify_all_trivial`,
-        { method: 'POST' }
+        `${BASE_URL}/circuits/${circuitId}/simplificationgraph`,
+        { method: 'PATCH' }
     );
 }
 
@@ -227,21 +246,21 @@ export async function simplifyEntireGraphTrivial(circuitId: string): Promise<Cir
 export async function undoSfg(circuitId: string): Promise<CircuitData> {
     return request<CircuitData>(
         `${BASE_URL}/circuits/${circuitId}/undo`,
-        { method: 'POST' }
+        { method: 'PATCH' }
     );
 }
 
 export async function redoSfg(circuitId: string): Promise<CircuitData> {
     return request<CircuitData>(
         `${BASE_URL}/circuits/${circuitId}/redo`,
-        { method: 'POST' }
+        { method: 'PATCH' }
     );
 }
 
 /* ---------- Export / Import ---------- */
 
 export async function exportSfg(circuitId: string): Promise<Blob> {
-    const res = await fetch(`${BASE_URL}/circuits/${circuitId}/sfg`);
+    const res = await fetch(`${BASE_URL}/circuits/${circuitId}/export`);
     if (!res.ok) throw new Error(`Export failed: ${res.status}`);
     return res.blob();
 }

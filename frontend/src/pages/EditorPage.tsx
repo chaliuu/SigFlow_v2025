@@ -75,8 +75,11 @@ export default function EditorPage() {
 
     /* ─── Derived data ─── */
     const nodeIds = useMemo(() => {
-        if (!circuit?.sfg?.nodes) return [];
-        return circuit.sfg.nodes.map((n: { data: Record<string, unknown> }) => String(n.data.id ?? n.data.label ?? ''));
+        const nodes = circuit?.sfg?.elements?.nodes;
+        if (!nodes) return [];
+        return nodes.map((n: { data: Record<string, unknown> }) =>
+            String(n.data.name ?? n.data.label ?? n.data.id ?? '')
+        );
     }, [circuit]);
 
     /* ─── Event handlers ─── */
