@@ -13,6 +13,9 @@ import tempfile
 import dill
 import json
 import sympy
+import re
+from util.latex_parser import correlate_params_from_latex, rewrite_symbolic_to_canonical
+
 
 import db
 
@@ -136,20 +139,34 @@ def update_edge_new(circuit_id):
 
     circuit_dict = circuit.to_dict(fields)
     params = circuit_dict.get("parameters", {})
-    if symbolic not in params:
+    allowed = set(params.keys())
+    #Finds the circuit parameters that are accepted as input
+
+    found, unknown = correlate_params_from_latex(symbolic, allowed)
+    #Confirms that the branch that is being edited contains circuit parameters
+
+    print("Found:", found)
+    print("Unknown:", unknown)
+
+    symbolic_canonical = rewrite_symbolic_to_canonical(symbolic, allowed)
+    #Converts LaTeX to Python equation
+
+    print("Original symbolic:", symbolic)
+    print("Canonical symbolic:", symbolic_canonical)
+
+    if unknown:
         print("User inputted invalid edge value in update_edge_new:", symbolic)
-        #abort(400, description=f"Invalid parameter '{symbolic}'. Must be one of: {', '.join(params.keys())}")
-        return jsonify(error=f"Invalid input '{symbolic}'"), 400
+        return jsonify(error=f"Invalid input: '{symbolic}'. Please ensure that the input is in LaTeX format."), 400
 
 
     
     try:
         print("Attempting to edit edge with the following data:")
-        print(f"Source: {input_node}, Target: {output_node}, Symbolic: {symbolic}")
+        print(f"Source: {input_node}, Target: {output_node}, Symbolic: {symbolic_canonical}")
 
         # Call the edit_edge function, print debug info before and after
         print("Calling circuit.edit_edge()...")
-        circuit.edit_edge(input_node, output_node, symbolic)
+        circuit.edit_edge(input_node, output_node, symbolic_canonical)
         print("Successfully called circuit.edit_edge()")
 
         print("Saving circuit...")
