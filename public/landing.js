@@ -168,72 +168,80 @@ form.addEventListener('submit', async function(event) {
 console.log('Initialized null json to be sent');
 console.log(json);
 
-
 const netlistFile = document.getElementById('formControlNetlistFile');
 netlistFile.addEventListener('change', event => {
     const file = event.target.files[0];
 
-    const reader = new FileReader();
-
-    reader.readAsText(file, 'utf-8');
-
-    reader.onerror = function(event) {
-        alert("Failed to read file!\n\n" + reader.error);
-        reader.abort(); // (...does this do anything useful in an onerror handler?)
-      };
-
-    reader.onload = () => {
-        const ext = file.name.match(/\.[0-9a-z]+$/i)[0].toLowerCase();
-        console.log(`Succesfully read ${ext} file`);
-
-        json.netlist = reader.result;
-       
-    }
+    readTextFileWithMultEncodings(file, '.cir file', text => {
+        json.netlist = text;
+    });
 });
 
 const schematicFile = document.getElementById('formControlSchematicFile');
 schematicFile.addEventListener('change', event => {
     const file = event.target.files[0];
 
-    const reader = new FileReader();
-
-    reader.readAsText(file, 'utf-8');
-
-    reader.onerror = function(event) {
-        alert("Failed to read file!\n\n" + reader.error);
-        reader.abort(); // (...does this do anything useful in an onerror handler?)
-      };
-
-    reader.onload = () => {
-        const ext = file.name.match(/\.[0-9a-z]+$/i)[0].toLowerCase();
-        console.log(`Succesfully read ${ext} file`);
-
-        json.schematic = reader.result;
-    }
+    readTextFileWithMultEncodings(file, '.asc file', text => {
+        json.schematic = text;
+    });
 });
 
 
 const opPointLogFile = document.getElementById('formControlOpLogFile');
 opPointLogFile.addEventListener('change', event => {
     const file = event.target.files[0];
-
-    const reader = new FileReader();
-
-    reader.readAsText(file, 'utf-8');
-
-    reader.onerror = function(event) {
-        alert("Failed to read file!\n\n" + reader.error);
-        reader.abort(); // (...does this do anything useful in an onerror handler?)
-      };
-
-    reader.onload = () => {
-        console.log(`Succesfully read op point log`);
-        json.op_point_log = reader.result;
-    }
+    readTextFileWithMultEncodings(file, '.log file', text => {
+        json.op_point_log = text;
+    });
 });
 
 const sfgUpload = document.getElementById('formControlSfgFile');
 sfgUpload.addEventListener('change', event => {
     sfgFile = event.target.files[0] || null;
 });
+
+
+function readTextFileWithMultEncodings(file, fileLabel, onSuccess) {
+    if (!file) {
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
+
+    reader.onerror = function() {
+        alert("Failed to read file!\n\n" + reader.error);
+        reader.abort();
+    };
+
+    reader.onload = () => {
+        const text = decodeBufferText(reader.result, fileLabel);
+        console.log(`Successfully read ${fileLabel}`);
+        onSuccess(text);
+    };
+}
+
+
+function decodeBufferText(buffer, fileLabel) {
+    const bytes = new Uint8Array(buffer);
+
+    // Checking for file encodings based on byte patterns
+    const hasUtf16Le = (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE);
+    const isSimilarUtf16Le = bytes.length >= 4 && bytes[1] === 0x00 && bytes[3] === 0x00;
+    const hasUtf16Be = (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF);
+
+    if (hasUtf16Le || isSimilarUtf16Le) {
+        console.log(`Detected UTF-16 LE encoding for ${fileLabel}`);
+        return new TextDecoder('utf-16le').decode(buffer);
+    }
+
+    if (hasUtf16Be) {
+        console.log(`Detected UTF-16 BE encoding for ${fileLabel}`);
+        return new TextDecoder('utf-16be').decode(buffer);
+    }
+
+    console.log(`Using UTF-8 encoding for ${fileLabel}`);
+    return new TextDecoder('utf-8').decode(buffer);
+}
+
     

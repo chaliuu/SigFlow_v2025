@@ -608,7 +608,8 @@ class MOSFET(Component):
 
         return g, r_pi, r_o
 
-transistor_section_pattern = re.compile(r' *--- (\S+) Transistors --- *$')
+# Updated regex pattern to match transistor section headers with various dash characters
+transistor_section_pattern = re.compile(r'-{2,}\s+(\S+)\s+Transistors\s+-{2,}')
 
 
 def get_hybrid_pi_parameters(op_point_log: str) \
@@ -625,6 +626,27 @@ def get_hybrid_pi_parameters(op_point_log: str) \
         Add support MOSFET transistors.
     """
     print("in get_hybrid_pi_parameters")
+    
+    # Server-side fallback: detect and fix UTF-16 encoding issues
+    # If the string contains null bytes (common when UTF-16 is misread as UTF-8), try to fix it
+    if '\x00' in op_point_log:
+        print("DEBUG: Detected null bytes in op_point_log - attempting UTF-16 LE decode")
+        try:
+            # The string was likely UTF-16 LE misread as Latin-1 or similar
+            # Convert back to bytes and decode properly
+            raw_bytes = op_point_log.encode('latin-1')
+            op_point_log = raw_bytes.decode('utf-16-le')
+            print("DEBUG: Successfully re-decoded as UTF-16 LE")
+        except Exception as e:
+            print(f"DEBUG: UTF-16 decode failed: {e}")
+    
+    # Normalize Unicode dash characters to standard ASCII hyphens
+    # This handles different LTSpice versions (Windows vs MacOS) that may use different dash characters
+    op_point_log = op_point_log.replace('\u2013', '-')  # en-dash
+    op_point_log = op_point_log.replace('\u2014', '-')  # em-dash
+    op_point_log = op_point_log.replace('\u2015', '-')  # horizontal bar
+    op_point_log = op_point_log.replace('\u2212', '-')  # minus sign
+    
     in_transistor_section = False
     relevant_rows = OrderedDict.fromkeys(('Name', 'Gm', 'Rpi', 'Ro', 'Id', 'Gds'))
 
@@ -633,8 +655,8 @@ def get_hybrid_pi_parameters(op_point_log: str) \
 
         if not in_transistor_section:
 
-            in_transistor_section = bool(transistor_section_pattern.match(line))
-            print("transistor regular expression matching:\n",line,"\n",transistor_section_pattern.match(line), transistor_section_pattern,"\n")
+            in_transistor_section = bool(transistor_section_pattern.search(line))
+            print("transistor regular expression matching:\n",line,"\n",transistor_section_pattern.search(line), transistor_section_pattern,"\n")
             continue
         
         row = re.findall(r'\S+', line)
@@ -656,6 +678,12 @@ def get_hybrid_pi_parameters(op_point_log: str) \
     print("after loop",relevant_rows,"\n")
     names = relevant_rows.pop('Name')
     print("names:",names)
+    
+    #If no transistors found, return empty dict
+    if names is None:
+        print("No transistors found in operating point log")
+        return {}
+    
     if(len(names) and names[0][0] == 'm'):
         print("inside:",relevant_rows['Gds'])
         _Id = relevant_rows.pop('Id')
