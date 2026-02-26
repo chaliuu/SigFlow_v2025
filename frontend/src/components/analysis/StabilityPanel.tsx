@@ -1,17 +1,19 @@
 /* ------------------------------------------------------------------ */
-/*  SigFlow – Stability Panel (Phase Margin + Bandwidth)               */
+/*  SigFlow – Stability Analysis Accordion Section                     */
 /* ------------------------------------------------------------------ */
 import React, { useState, useCallback, useMemo } from 'react';
 import {
-  Card,
-  CardContent,
+  Box,
   Typography,
+  Stack,
   TextField,
   Button,
-  Stack,
   Alert,
-  Box,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SecurityIcon from '@mui/icons-material/Security';
 
 import {
@@ -21,135 +23,165 @@ import {
   PointElement,
   LineElement,
   Title,
-  Tooltip,
+  Tooltip as ChartTooltip,
   Legend,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
 import { useCircuit } from '../../context/CircuitContext';
 import * as api from '../../api/circuitApi';
+import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
-
-interface StabilityData {
-  pm: { device_value: number[]; phase_margin: number[] } | null;
-  bw: { parameter_value: number[]; bandwidth: number[] } | null;
-}
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  ChartTooltip,
+  Legend,
+);
 
 export default function StabilityPanel() {
   const { circuitId } = useCircuit();
-  const [inputNode, setInputNode] = useState('');
-  const [outputNode, setOutputNode] = useState('');
-  const [device, setDevice] = useState('');
-  const [minVal, setMinVal] = useState('');
-  const [maxVal, setMaxVal] = useState('');
-  const [stepSize, setStepSize] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [stabData, setStabData] = useState<StabilityData>({ pm: null, bw: null });
 
-  const handleSubmit = useCallback(
+  const [stabIn, setStabIn] = useState('');
+  const [stabOut, setStabOut] = useState('');
+  const [stabDev, setStabDev] = useState('');
+  const [stabMin, setStabMin] = useState('');
+  const [stabMax, setStabMax] = useState('');
+  const [stabStep, setStabStep] = useState('');
+  const [stabErr, setStabErr] = useState<string | null>(null);
+  const [stabPm, setStabPm] = useState<{
+    device_value: number[];
+    phase_margin: number[];
+  } | null>(null);
+  const [stabBw, setStabBw] = useState<{
+    parameter_value: number[];
+    bandwidth: number[];
+  } | null>(null);
+
+  const handleStability = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (!circuitId) return;
-      setError(null);
-
-      if (!inputNode || !outputNode || !device || !minVal || !maxVal || !stepSize) {
-        setError('Please fill in all fields.');
+      setStabErr(null);
+      if (!stabIn || !stabOut || !stabDev || !stabMin || !stabMax || !stabStep) {
+        setStabErr('Please fill in all fields.');
         return;
       }
-
-      const params = {
-        input_node: inputNode,
-        output_node: outputNode,
-        selected_device: device,
-        min_val: parseFloat(minVal),
-        max_val: parseFloat(maxVal),
-        step_size: parseFloat(stepSize),
+      const p = {
+        input_node: stabIn,
+        output_node: stabOut,
+        selected_device: stabDev,
+        min_val: parseFloat(stabMin),
+        max_val: parseFloat(stabMax),
+        step_size: parseFloat(stabStep),
       };
-
       try {
-        const exists = await api.checkDeviceExists(circuitId, device);
+        const exists = await api.checkDeviceExists(circuitId, stabDev);
         if (!exists) {
-          setError(`Device "${device}" not found.`);
+          setStabErr(`Device "${stabDev}" not found.`);
           return;
         }
-
         const [pm, bw] = await Promise.all([
-          api.getPhaseMarginPlot(circuitId, params),
-          api.getBandwidthPlot(circuitId, params),
+          api.getPhaseMarginPlot(circuitId, p),
+          api.getBandwidthPlot(circuitId, p),
         ]);
-        setStabData({ pm, bw });
+        setStabPm(pm);
+        setStabBw(bw);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Error');
+        setStabErr(err instanceof Error ? err.message : 'Error');
       }
     },
-    [circuitId, inputNode, outputNode, device, minVal, maxVal, stepSize],
+    [circuitId, stabIn, stabOut, stabDev, stabMin, stabMax, stabStep],
   );
 
-  const pmChart = useMemo(() => {
-    if (!stabData.pm) return null;
+  const pmChartData = useMemo(() => {
+    if (!stabPm) return null;
     return {
-      labels: stabData.pm.device_value.map(String),
+      labels: stabPm.device_value.map(String),
       datasets: [
         {
           label: 'Phase Margin (°)',
-          data: stabData.pm.phase_margin,
+          data: stabPm.phase_margin,
           borderColor: '#26a69a',
           backgroundColor: '#26a69a',
           fill: false,
+          pointRadius: 2,
+          borderWidth: 2,
         },
       ],
     };
-  }, [stabData.pm]);
+  }, [stabPm]);
 
-  const bwChart = useMemo(() => {
-    if (!stabData.bw) return null;
+  const bwChartData = useMemo(() => {
+    if (!stabBw) return null;
     return {
-      labels: stabData.bw.parameter_value.map(String),
+      labels: stabBw.parameter_value.map(String),
       datasets: [
         {
           label: 'Bandwidth (Hz)',
-          data: stabData.bw.bandwidth,
+          data: stabBw.bandwidth,
           borderColor: '#7e57c2',
           backgroundColor: '#7e57c2',
           fill: false,
+          pointRadius: 2,
+          borderWidth: 2,
         },
       ],
     };
-  }, [stabData.bw]);
+  }, [stabBw]);
+
+  const smallChartOpts = useCallback(
+    (title: string, yLabel: string) => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: { display: true, text: title, font: { size: 11 } },
+        legend: { display: false },
+      },
+      scales: {
+        x: { title: { display: true, text: stabDev, font: { size: 10 } } },
+        y: { title: { display: true, text: yLabel, font: { size: 10 } } },
+      },
+    }),
+    [stabDev],
+  );
 
   return (
-    <Card>
-      <CardContent>
-        <Stack direction="row" alignItems="center" spacing={1} mb={1.5}>
+    <Accordion disableGutters sx={accordionSx}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
+        <Stack direction="row" alignItems="center" spacing={1}>
           <SecurityIcon color="primary" fontSize="small" />
-          <Typography variant="subtitle1" fontWeight={600}>
+          <Typography variant="subtitle2" fontWeight={600}>
             Stability Analysis
           </Typography>
         </Stack>
-
-        <form onSubmit={handleSubmit}>
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 0.5 }}>
+        <form onSubmit={handleStability}>
           <Stack spacing={1.5}>
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Input Node"
-                value={inputNode}
-                onChange={(e) => setInputNode(e.target.value)}
+                label="Input"
+                value={stabIn}
+                onChange={(e) => setStabIn(e.target.value)}
                 size="small"
                 fullWidth
               />
               <TextField
-                label="Output Node"
-                value={outputNode}
-                onChange={(e) => setOutputNode(e.target.value)}
+                label="Output"
+                value={stabOut}
+                onChange={(e) => setStabOut(e.target.value)}
                 size="small"
                 fullWidth
               />
             </Stack>
             <TextField
               label="Device parameter"
-              value={device}
-              onChange={(e) => setDevice(e.target.value)}
+              value={stabDev}
+              onChange={(e) => setStabDev(e.target.value)}
               size="small"
               fullWidth
             />
@@ -157,24 +189,24 @@ export default function StabilityPanel() {
               <TextField
                 label="Min"
                 type="number"
-                value={minVal}
-                onChange={(e) => setMinVal(e.target.value)}
+                value={stabMin}
+                onChange={(e) => setStabMin(e.target.value)}
                 size="small"
                 fullWidth
               />
               <TextField
                 label="Max"
                 type="number"
-                value={maxVal}
-                onChange={(e) => setMaxVal(e.target.value)}
+                value={stabMax}
+                onChange={(e) => setStabMax(e.target.value)}
                 size="small"
                 fullWidth
               />
               <TextField
                 label="Step"
                 type="number"
-                value={stepSize}
-                onChange={(e) => setStepSize(e.target.value)}
+                value={stabStep}
+                onChange={(e) => setStabStep(e.target.value)}
                 size="small"
                 fullWidth
               />
@@ -185,53 +217,29 @@ export default function StabilityPanel() {
           </Stack>
         </form>
 
-        {error && (
+        {stabErr && (
           <Alert severity="error" sx={{ mt: 1 }}>
-            {error}
+            {stabErr}
           </Alert>
         )}
 
-        {(pmChart || bwChart) && (
-          <Stack spacing={2} mt={2}>
-            {pmChart && (
-              <Box sx={{ height: 280 }}>
-                <Line
-                  data={pmChart}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      title: { display: true, text: `${device} vs Phase Margin` },
-                    },
-                    scales: {
-                      x: { title: { display: true, text: device } },
-                      y: { title: { display: true, text: 'Phase Margin (°)' } },
-                    },
-                  }}
-                />
-              </Box>
-            )}
-            {bwChart && (
-              <Box sx={{ height: 280 }}>
-                <Line
-                  data={bwChart}
-                  options={{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                      title: { display: true, text: `${device} vs Bandwidth` },
-                    },
-                    scales: {
-                      x: { title: { display: true, text: device } },
-                      y: { title: { display: true, text: 'Bandwidth (Hz)' } },
-                    },
-                  }}
-                />
-              </Box>
-            )}
-          </Stack>
+        {pmChartData && (
+          <Box sx={{ mt: 2, height: 200 }}>
+            <Line
+              data={pmChartData}
+              options={smallChartOpts(`${stabDev} vs Phase Margin`, 'Phase Margin (°)')}
+            />
+          </Box>
         )}
-      </CardContent>
-    </Card>
+        {bwChartData && (
+          <Box sx={{ mt: 2, height: 200 }}>
+            <Line
+              data={bwChartData}
+              options={smallChartOpts(`${stabDev} vs Bandwidth`, 'Bandwidth (Hz)')}
+            />
+          </Box>
+        )}
+      </AccordionDetails>
+    </Accordion>
   );
 }

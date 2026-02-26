@@ -1,131 +1,141 @@
 /* ------------------------------------------------------------------ */
-/*  SigFlow – Transfer Function Panel                                  */
+/*  SigFlow – Transfer Function Accordion Section                      */
 /* ------------------------------------------------------------------ */
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
-  Card,
-  CardContent,
+  Box,
   Typography,
+  Stack,
   TextField,
   Button,
-  Stack,
   Switch,
   FormControlLabel,
   Alert,
-  Box,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FunctionsIcon from '@mui/icons-material/Functions';
 
 import { useCircuit } from '../../context/CircuitContext';
 import * as api from '../../api/circuitApi';
 import { typesetMath } from '../../utils/formatting';
+import type { BodeData } from '../../types';
+import BodeChart from './BodeChart';
+import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
 export default function TransferFunctionPanel() {
   const { circuitId } = useCircuit();
-  const [inputNode, setInputNode] = useState('');
-  const [outputNode, setOutputNode] = useState('');
-  const [numerical, setNumerical] = useState(false);
-  const [latex, setLatex] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+
+  const [tfIn, setTfIn] = useState('');
+  const [tfOut, setTfOut] = useState('');
+  const [tfNum, setTfNum] = useState(false);
+  const [tfLatex, setTfLatex] = useState('');
+  const [tfErr, setTfErr] = useState<string | null>(null);
 
   const fetchTF = useCallback(async () => {
-    if (!circuitId || !inputNode || !outputNode) return;
-    setError(null);
+    if (!circuitId || !tfIn || !tfOut) return;
+    setTfErr(null);
     try {
-      const res = await api.getTransferFunction(circuitId, inputNode, outputNode, numerical);
-      setLatex(res.transfer_function);
+      const res = await api.getTransferFunction(circuitId, tfIn, tfOut, tfNum);
+      setTfLatex(res.transfer_function);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
+      setTfErr(err instanceof Error ? err.message : 'Error');
     }
-  }, [circuitId, inputNode, outputNode, numerical]);
+  }, [circuitId, tfIn, tfOut, tfNum]);
 
-  /* Typeset MathJax whenever latex changes */
   useEffect(() => {
-    if (latex) {
-      requestAnimationFrame(() => typesetMath());
-    }
-  }, [latex]);
+    if (tfLatex) requestAnimationFrame(() => typesetMath());
+  }, [tfLatex]);
 
-  const handleSubmit = useCallback(
-    (e: React.FormEvent) => {
-      e.preventDefault();
-      fetchTF();
+  const fetchTFBode = useCallback(
+    async (p: Record<string, string | number>): Promise<BodeData> => {
+      if (!circuitId) throw new Error('No circuit');
+      return api.getTransferFunctionBode(circuitId, {
+        input_node: String(p.input_node ?? tfIn),
+        output_node: String(p.output_node ?? tfOut),
+        start_freq_hz: Number(p.start_freq_hz),
+        end_freq_hz: Number(p.end_freq_hz),
+        points_per_decade: Number(p.points_per_decade),
+      });
     },
-    [fetchTF],
+    [circuitId, tfIn, tfOut],
   );
 
   return (
-    <Card>
-      <CardContent>
-        <Stack direction="row" alignItems="center" spacing={1} mb={1.5}>
+    <Accordion disableGutters sx={accordionSx}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
+        <Stack direction="row" alignItems="center" spacing={1}>
           <FunctionsIcon color="primary" fontSize="small" />
-          <Typography variant="subtitle1" fontWeight={600}>
+          <Typography variant="subtitle2" fontWeight={600}>
             Transfer Function
           </Typography>
         </Stack>
-
-        <form onSubmit={handleSubmit}>
-          <Stack spacing={1.5}>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Input Node"
-                value={inputNode}
-                onChange={(e) => setInputNode(e.target.value)}
-                size="small"
-                fullWidth
-              />
-              <TextField
-                label="Output Node"
-                value={outputNode}
-                onChange={(e) => setOutputNode(e.target.value)}
-                size="small"
-                fullWidth
-              />
-            </Stack>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Button type="submit" variant="contained" size="small">
-                Compute
-              </Button>
-              <FormControlLabel
-                control={
-                  <Switch
-                    size="small"
-                    checked={numerical}
-                    onChange={() => {
-                      setNumerical(!numerical);
-                      if (latex) fetchTF();
-                    }}
-                  />
-                }
-                label="Numerical"
-              />
-            </Stack>
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 0.5 }}>
+        {/* Symbolic TF */}
+        <Stack spacing={1.5}>
+          <Stack direction="row" spacing={1}>
+            <TextField
+              label="Input Node"
+              value={tfIn}
+              onChange={(e) => setTfIn(e.target.value)}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Output Node"
+              value={tfOut}
+              onChange={(e) => setTfOut(e.target.value)}
+              size="small"
+              fullWidth
+            />
           </Stack>
-        </form>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <Button variant="contained" size="small" onClick={fetchTF}>
+              Compute
+            </Button>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={tfNum}
+                  onChange={() => {
+                    setTfNum(!tfNum);
+                    if (tfLatex) fetchTF();
+                  }}
+                />
+              }
+              label={<Typography variant="caption">Numerical</Typography>}
+            />
+          </Stack>
+        </Stack>
 
-        {error && (
+        {tfErr && (
           <Alert severity="error" sx={{ mt: 1 }}>
-            {error}
+            {tfErr}
           </Alert>
         )}
 
-        {latex && (
+        {tfLatex && (
           <Box
-            ref={containerRef}
             sx={{
-              mt: 2,
-              p: 1.5,
+              mt: 1.5,
+              p: 1,
               bgcolor: '#f8f9fa',
               borderRadius: 1,
               overflow: 'auto',
-              fontSize: 14,
+              fontSize: 13,
             }}
           >
-            {`\\(${latex}\\)`}
+            {`\\(${tfLatex}\\)`}
           </Box>
         )}
-      </CardContent>
-    </Card>
+
+        {/* TF Bode plot */}
+        <BodeChart label="Bode Plot" onFetch={fetchTFBode} />
+      </AccordionDetails>
+    </Accordion>
   );
 }

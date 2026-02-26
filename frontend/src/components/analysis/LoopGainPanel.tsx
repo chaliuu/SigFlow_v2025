@@ -1,55 +1,74 @@
 /* ------------------------------------------------------------------ */
-/*  SigFlow – Loop Gain Panel                                          */
+/*  SigFlow – Loop Gain Accordion Section                              */
 /* ------------------------------------------------------------------ */
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  Card,
-  CardContent,
+  Box,
   Typography,
-  Button,
   Stack,
+  Button,
   Switch,
   FormControlLabel,
   Alert,
-  Box,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import LoopIcon from '@mui/icons-material/Loop';
 
 import { useCircuit } from '../../context/CircuitContext';
 import * as api from '../../api/circuitApi';
 import { typesetMath } from '../../utils/formatting';
+import type { BodeData } from '../../types';
+import BodeChart from './BodeChart';
+import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
 export default function LoopGainPanel() {
   const { circuitId } = useCircuit();
-  const [numerical, setNumerical] = useState(false);
-  const [latex, setLatex] = useState('');
-  const [error, setError] = useState<string | null>(null);
+
+  const [lgNum, setLgNum] = useState(false);
+  const [lgLatex, setLgLatex] = useState('');
+  const [lgErr, setLgErr] = useState<string | null>(null);
 
   const fetchLG = useCallback(async () => {
     if (!circuitId) return;
-    setError(null);
+    setLgErr(null);
     try {
-      const res = await api.getLoopGain(circuitId, numerical);
-      setLatex(res.loop_gain);
+      const res = await api.getLoopGain(circuitId, lgNum);
+      setLgLatex(res.loop_gain);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error');
+      setLgErr(err instanceof Error ? err.message : 'Error');
     }
-  }, [circuitId, numerical]);
+  }, [circuitId, lgNum]);
 
   useEffect(() => {
-    if (latex) requestAnimationFrame(() => typesetMath());
-  }, [latex]);
+    if (lgLatex) requestAnimationFrame(() => typesetMath());
+  }, [lgLatex]);
+
+  const fetchLGBode = useCallback(
+    async (p: Record<string, string | number>): Promise<BodeData> => {
+      if (!circuitId) throw new Error('No circuit');
+      return api.getLoopGainBode(circuitId, {
+        start_freq_hz: Number(p.start_freq_hz),
+        end_freq_hz: Number(p.end_freq_hz),
+        points_per_decade: Number(p.points_per_decade),
+      });
+    },
+    [circuitId],
+  );
 
   return (
-    <Card>
-      <CardContent>
-        <Stack direction="row" alignItems="center" spacing={1} mb={1.5}>
+    <Accordion disableGutters sx={accordionSx}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
+        <Stack direction="row" alignItems="center" spacing={1}>
           <LoopIcon color="primary" fontSize="small" />
-          <Typography variant="subtitle1" fontWeight={600}>
+          <Typography variant="subtitle2" fontWeight={600}>
             Loop Gain
           </Typography>
         </Stack>
-
+      </AccordionSummary>
+      <AccordionDetails sx={{ pt: 0.5 }}>
         <Stack direction="row" alignItems="center" spacing={2}>
           <Button variant="contained" size="small" onClick={fetchLG}>
             Compute
@@ -58,38 +77,41 @@ export default function LoopGainPanel() {
             control={
               <Switch
                 size="small"
-                checked={numerical}
+                checked={lgNum}
                 onChange={() => {
-                  setNumerical(!numerical);
-                  if (latex) fetchLG();
+                  setLgNum(!lgNum);
+                  if (lgLatex) fetchLG();
                 }}
               />
             }
-            label="Numerical"
+            label={<Typography variant="caption">Numerical</Typography>}
           />
         </Stack>
 
-        {error && (
+        {lgErr && (
           <Alert severity="error" sx={{ mt: 1 }}>
-            {error}
+            {lgErr}
           </Alert>
         )}
 
-        {latex && (
+        {lgLatex && (
           <Box
             sx={{
-              mt: 2,
-              p: 1.5,
+              mt: 1.5,
+              p: 1,
               bgcolor: '#f8f9fa',
               borderRadius: 1,
               overflow: 'auto',
-              fontSize: 14,
+              fontSize: 13,
             }}
           >
-            {`\\(${latex}\\)`}
+            {`\\(${lgLatex}\\)`}
           </Box>
         )}
-      </CardContent>
-    </Card>
+
+        {/* LG Bode plot */}
+        <BodeChart label="Bode Plot" onFetch={fetchLGBode} />
+      </AccordionDetails>
+    </Accordion>
   );
 }

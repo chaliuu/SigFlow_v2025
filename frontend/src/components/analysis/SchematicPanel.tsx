@@ -1,21 +1,29 @@
 /* ------------------------------------------------------------------ */
-/*  SigFlow – Schematic Panel                                          */
+/*  SigFlow – Circuit Schematic Accordion Section                      */
 /* ------------------------------------------------------------------ */
-import React, { useRef, useEffect } from 'react';
-import { Card, CardContent, Typography, Box, Stack } from '@mui/material';
+import React, { useEffect, useRef } from 'react';
+import {
+  Box,
+  Typography,
+  Stack,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import SchemaIcon from '@mui/icons-material/Schema';
 
 import { useCircuit } from '../../context/CircuitContext';
+import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
 export default function SchematicPanel() {
   const { data } = useCircuit();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const schematicRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || !data?.svg) return;
-    containerRef.current.innerHTML = data.svg;
-
-    const svg = containerRef.current.querySelector('svg');
+    if (!schematicRef.current || !data?.svg) return;
+    schematicRef.current.innerHTML = data.svg;
+    const svg = schematicRef.current.querySelector('svg');
     if (svg) {
       try {
         const bbox = svg.getBBox();
@@ -28,23 +36,25 @@ export default function SchematicPanel() {
       }
       svg.setAttribute('width', '100%');
       svg.setAttribute('height', '100%');
-      svg.style.maxHeight = '400px';
+      svg.style.maxHeight = '300px';
     }
   }, [data?.svg]);
 
   if (!data?.svg) return null;
 
   return (
-    <Card>
-      <CardContent>
-        <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+    <Accordion disableGutters sx={accordionSx}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
+        <Stack direction="row" alignItems="center" spacing={1}>
           <SchemaIcon color="primary" fontSize="small" />
-          <Typography variant="subtitle1" fontWeight={600}>
+          <Typography variant="subtitle2" fontWeight={600}>
             Circuit Schematic
           </Typography>
         </Stack>
+      </AccordionSummary>
+      <AccordionDetails>
         <Box
-          ref={containerRef}
+          ref={schematicRef}
           sx={{
             border: '1px solid',
             borderColor: 'divider',
@@ -54,7 +64,7 @@ export default function SchematicPanel() {
             bgcolor: '#fff',
           }}
         />
-      </CardContent>
-    </Card>
+      </AccordionDetails>
+    </Accordion>
   );
 }

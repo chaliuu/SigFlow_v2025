@@ -33,6 +33,7 @@ import * as api from '../api/circuitApi';
 import SfgEmbed from '../components/sfg/SfgEmbed';
 import SfgToolbar from '../components/sfg/SfgToolbar';
 import AnalysisSidebar from '../components/sidebar/AnalysisSidebar';
+import TransferFunctionPanel from '../components/analysis/TransferFunctionPanel';
 
 const SIDEBAR_WIDTH = 380;
 
@@ -184,8 +185,9 @@ export default function SfgAppPage() {
           <Box sx={{ flex: 1, overflow: 'hidden' }}>
             <SfgEmbed circuitId={circuitId} iframeRef={iframeRef} />
           </Box>
+        <TransferFunctionPanel />
         </Box>
-      </Box>
+        </Box>
     </Box>
   );
 }
