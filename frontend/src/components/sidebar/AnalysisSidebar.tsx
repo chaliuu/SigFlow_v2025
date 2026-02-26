@@ -13,7 +13,6 @@ import { Box, Typography } from '@mui/material';
 
 import { useCircuit } from '../../context/CircuitContext';
 import ParameterPanel from '../analysis/ParameterPanel';
-import TransferFunctionPanel from '../analysis/TransferFunctionPanel';
 import LoopGainPanel from '../analysis/LoopGainPanel';
 import StabilityPanel from '../analysis/StabilityPanel';
 import SchematicPanel from '../analysis/SchematicPanel';
@@ -36,7 +35,6 @@ export default function AnalysisSidebar() {
       </Box>
 
       <ParameterPanel />
-      <TransferFunctionPanel />
       <LoopGainPanel />
       <StabilityPanel />
       <SchematicPanel />
