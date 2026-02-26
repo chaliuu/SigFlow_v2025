@@ -34,16 +34,20 @@ export default function TransferFunctionPanel() {
   const [tfLatex, setTfLatex] = useState('');
   const [tfErr, setTfErr] = useState<string | null>(null);
 
-  const fetchTF = useCallback(async () => {
-    if (!circuitId || !tfIn || !tfOut) return;
-    setTfErr(null);
-    try {
-      const res = await api.getTransferFunction(circuitId, tfIn, tfOut, tfNum);
-      setTfLatex(res.transfer_function);
-    } catch (err) {
-      setTfErr(err instanceof Error ? err.message : 'Error');
-    }
-  }, [circuitId, tfIn, tfOut, tfNum]);
+  const fetchTF = useCallback(
+    async (numericalOverride?: boolean) => {
+      if (!circuitId || !tfIn || !tfOut) return;
+      setTfErr(null);
+      const numerical = numericalOverride ?? tfNum;
+      try {
+        const res = await api.getTransferFunction(circuitId, tfIn, tfOut, numerical);
+        setTfLatex(res.transfer_function);
+      } catch (err) {
+        setTfErr(err instanceof Error ? err.message : 'Error');
+      }
+    },
+    [circuitId, tfIn, tfOut, tfNum],
+  );
 
   useEffect(() => {
     if (tfLatex) requestAnimationFrame(() => typesetMath());
@@ -93,7 +97,7 @@ export default function TransferFunctionPanel() {
             />
           </Stack>
           <Stack direction="row" alignItems="center" spacing={2}>
-            <Button variant="contained" size="small" onClick={fetchTF}>
+            <Button variant="contained" size="small" onClick={() => fetchTF()}>
               Compute
             </Button>
             <FormControlLabel
@@ -102,8 +106,9 @@ export default function TransferFunctionPanel() {
                   size="small"
                   checked={tfNum}
                   onChange={() => {
-                    setTfNum(!tfNum);
-                    if (tfLatex) fetchTF();
+                    const next = !tfNum;
+                    setTfNum(next);
+                    if (tfLatex) {fetchTF(next);}
                   }}
                 />
               }

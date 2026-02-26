@@ -31,16 +31,20 @@ export default function LoopGainPanel() {
   const [lgLatex, setLgLatex] = useState('');
   const [lgErr, setLgErr] = useState<string | null>(null);
 
-  const fetchLG = useCallback(async () => {
-    if (!circuitId) return;
-    setLgErr(null);
-    try {
-      const res = await api.getLoopGain(circuitId, lgNum);
-      setLgLatex(res.loop_gain);
-    } catch (err) {
-      setLgErr(err instanceof Error ? err.message : 'Error');
-    }
-  }, [circuitId, lgNum]);
+  const fetchLG = useCallback(
+    async (numericalOverride?: boolean) => {
+      if (!circuitId) return;
+      setLgErr(null);
+      const numerical = numericalOverride ?? lgNum;
+      try {
+        const res = await api.getLoopGain(circuitId, numerical);
+        setLgLatex(res.loop_gain);
+      } catch (err) {
+        setLgErr(err instanceof Error ? err.message : 'Error');
+      }
+    },
+    [circuitId, lgNum],
+  );
 
   useEffect(() => {
     if (lgLatex) requestAnimationFrame(() => typesetMath());
@@ -70,7 +74,7 @@ export default function LoopGainPanel() {
       </AccordionSummary>
       <AccordionDetails sx={{ pt: 0.5 }}>
         <Stack direction="row" alignItems="center" spacing={2}>
-          <Button variant="contained" size="small" onClick={fetchLG}>
+          <Button variant="contained" size="small" onClick={() => fetchLG()}>
             Compute
           </Button>
           <FormControlLabel
@@ -79,8 +83,9 @@ export default function LoopGainPanel() {
                 size="small"
                 checked={lgNum}
                 onChange={() => {
-                  setLgNum(!lgNum);
-                  if (lgLatex) fetchLG();
+                  const next = !lgNum;
+                  setLgNum(next);
+                  if (lgLatex) {fetchLG(next);}
                 }}
               />
             }
