@@ -36,7 +36,6 @@ export default function AnalysisSidebar() {
       </Box>
 
       <ParameterPanel />
-      <TransferFunctionPanel />
       <LoopGainPanel />
       <StabilityPanel />
       <SchematicPanel />
