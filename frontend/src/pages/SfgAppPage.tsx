@@ -34,6 +34,7 @@ import SfgEmbed from '../components/sfg/SfgEmbed';
 import SfgToolbar from '../components/sfg/SfgToolbar';
 import AnalysisSidebar from '../components/sidebar/AnalysisSidebar';
 import TransferFunctionPanel from '../components/analysis/TransferFunctionPanel';
+import LoopGainPanel from '@/components/analysis/LoopGainPanel';
 
 const SIDEBAR_WIDTH = 380;
 
@@ -182,12 +183,19 @@ export default function SfgAppPage() {
         {/* SFG viewer – toolbar + legacy iframe fills remaining space */}
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <SfgToolbar iframeRef={iframeRef} />
-          <Box sx={{ flex: 1, overflow: 'hidden' }}>
+          {/* SFG iframe area */}
+          <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             <SfgEmbed circuitId={circuitId} iframeRef={iframeRef} />
           </Box>
-        <TransferFunctionPanel />
+          {/* Panels under SFG */}
+          <Box sx={{ borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default', p: 1, overflow: 'auto', }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1, alignItems: 'start', }}>
+              <TransferFunctionPanel />
+              <LoopGainPanel />
+            </Box>
+          </Box>
         </Box>
-        </Box>
+      </Box>
     </Box>
   );
 }
