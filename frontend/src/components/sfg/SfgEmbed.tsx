@@ -23,7 +23,20 @@ const SfgEmbed = forwardRef<HTMLIFrameElement, SfgEmbedProps>(
     useEffect(() => {
       sessionStorage.setItem('circuitId', circuitId);
     }, [circuitId]);
+    
+    useEffect(() => {
+      function onMessage(event: MessageEvent) {
+        if (event.data?.type !== 'sfg-scroll-intent') return;
 
+        const deltaX = Number(event.data.deltaX) || 0;
+        const deltaY = Number(event.data.deltaY) || 0;
+        window.scrollBy({ left: deltaX, top: deltaY, behavior: 'auto' });
+      }
+
+      window.addEventListener('message', onMessage);
+      return () => window.removeEventListener('message', onMessage);
+    }, []);
+    
     /* Expose the iframe element on both the forwarded ref and the passed ref */
     useImperativeHandle(ref, () => iframeRef.current as HTMLIFrameElement);
 
