@@ -29,9 +29,9 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch';
 
-import { createCircuit, importSfgFile } from '../../api/circuitApi';
-import { decodeBufferText } from '../../utils/formatting';
-import { useCircuit } from '../../context/CircuitContext';
+import { createCircuit, importSfgFile } from '../api/circuitApi';
+import { decodeBufferText } from '../utils/formatting';
+import { useCircuit } from '../context/CircuitContext';
 
 /* ---------- file-drop helper ---------- */
 interface FileSlot {

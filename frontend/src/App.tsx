@@ -7,7 +7,7 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 
 import theme from './theme';
 import { CircuitProvider } from './context/CircuitContext';
-import LandingPage from './components/landing/LandingPage';
+import LandingPage from './pages/LandingPage';
 import SfgAppPage from './pages/SfgAppPage';
 
 export default function App() {
