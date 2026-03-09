@@ -437,7 +437,78 @@ function make_sfg(elements) {
   }
 
   var cy = window.cy = createSfgInstance(container, elements);
+  // Require Ctrl/Cmd + wheel for zooming. Plain wheel gestures are treated
+  // as page-scroll intents and forwarded to the parent app.
+  const SFG_MIN_ZOOM = 0.2;
+  const SFG_MAX_ZOOM = 3;
+  cy.userZoomingEnabled(false);
+  cy.minZoom(SFG_MIN_ZOOM);
+  cy.maxZoom(SFG_MAX_ZOOM);
+  cy.zoom(Math.max(SFG_MIN_ZOOM, Math.min(SFG_MAX_ZOOM, cy.zoom())));
   setupEdgeCurveCurvature(cy);
+
+    if (!container.dataset.ctrlZoomHintAttached) {
+    const hint = document.createElement('div');
+    hint.id = 'ctrl-zoom-hint';
+    hint.textContent = 'Hold Ctrl/Cmd + Scroll to zoom';
+    Object.assign(hint.style, {
+      position: 'absolute',
+      left: '12px',
+      bottom: '12px',
+      padding: '4px 8px',
+      borderRadius: '6px',
+      fontSize: '12px',
+      lineHeight: '1.2',
+      color: '#1f2937',
+      background: 'rgba(255, 255, 255, 0.88)',
+      border: '1px solid rgba(0, 0, 0, 0.12)',
+      boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
+      zIndex: '20',
+      pointerEvents: 'none',
+    });
+    container.appendChild(hint);
+    container.dataset.ctrlZoomHintAttached = 'true';
+  }
+
+  if (!container.dataset.ctrlZoomWheelHandlerAttached) {
+    container.addEventListener('wheel', function (evt) {
+      const isModifierZoom = evt.ctrlKey || evt.metaKey;
+
+      if (!isModifierZoom) {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'sfg-scroll-intent',
+            deltaX: evt.deltaX,
+            deltaY: evt.deltaY,
+          }, '*');
+        }
+        return;
+      }
+
+      evt.preventDefault();
+
+      const zoomDirection = evt.deltaY < 0 ? 1 : -1;
+      const zoomFactor = 1 + (zoomDirection * 0.12);
+      const activeCy = window.cy;
+      if (!activeCy || activeCy.destroyed()) {
+        return;
+      }
+
+      const currentZoom = activeCy.zoom();
+      const minZoom = SFG_MIN_ZOOM;
+      const maxZoom = SFG_MAX_ZOOM;
+      const nextZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom * zoomFactor));
+
+      activeCy.zoom({
+        level: nextZoom,
+        renderedPosition: {
+          x: evt.offsetX,
+          y: evt.offsetY,
+        },
+      });
+    }, { passive: false });
+    container.dataset.ctrlZoomWheelHandlerAttached = 'true';
+  }
 
   // make lines straight when aligned
   cy.edges().forEach((edge, idx) => {

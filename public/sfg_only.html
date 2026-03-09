@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SigFlow – SFG Graph</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
+
+  <link rel="stylesheet" href="sfg_style.css">
+  <link rel="stylesheet" href="bode_style.css">
+
+  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.10/lodash.js"></script>
+  <script src="cytoscape-edgehandles.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@2.8.0"></script>
+  <script src="https://cdn.rawgit.com/cpettitt/dagre/v0.7.4/dist/dagre.js"></script>
+  <script src="https://cdn.rawgit.com/cytoscape/cytoscape.js-dagre/1.5.0/cytoscape-dagre.js"></script>
+  <script src="https://unpkg.com/popper.js@1.14.7/dist/umd/popper.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-popper@1.0.5/cytoscape-popper.min.js"></script>
+  <script src="sfg_script.js" defer></script>
+
+  <style>
+    /* ---- sfg_only overrides ---- */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #fafafa;
+    }
+
+    /* Hide the panels / parameter sidebar */
+    .panels { display: flex; width: 100%; height: 100%; }
+    .parameter-panel { display: none !important; }
+
+    /* Middle layer fills everything */
+    .middle-layer { display: flex; flex-direction: column; width: 100%; height: 100%; }
+    .sfg-panel { display: flex; flex-direction: column; width: 100%; height: 100%; }
+
+    /* Hide the old toolbar / controls area */
+    .container-top { display: none !important; }
+
+    /* Hide the toggle-button-container, circuit-panel, right-layer */
+    #toggle-button-container { display: none !important; }
+    .circuit-panel { display: none !important; }
+    .right-layer { display: none !important; }
+
+    /* SFG graph section fills remaining space */
+    .sfg-section {
+      flex: 1;
+      border: none;
+      position: relative;
+      overflow: hidden;
+    }
+    .sfg-section h1 { display: none; }
+
+    #overlay-container {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #cy {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+    }
+    #svg-layer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.5;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Edge labels stay visible */
+    [id^=edge-] {
+      text-shadow: 5px 5px #d3d3d3, -5px -5px #d3d3d3, -5px 5px #d3d3d3, 5px -5px #d3d3d3;
+      z-index: 999;
+    }
+    .label[x-out-of-boundaries] { display: none !important; }
+
+    /* Edge-info tooltip */
+    #edge-info {
+      position: fixed;
+      background-color: white;
+      border: 1px solid black;
+      padding: 10px;
+      max-width: 200px;
+      display: none;
+      pointer-events: none;
+      color: black;
+      z-index: 1000;
+    }
+
+    /* Modal – keep working (used for edge edit) */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 10000;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+      overflow: auto;
+      background-color: rgba(0,0,0,0.4);
+    }
+    .modal-content {
+      background-color: #fefefe;
+      margin: 10% auto;
+      padding: 20px;
+      border: 1px solid #888;
+      width: 70%;
+      border-radius: 8px;
+    }
+    .close {
+      color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;
+    }
+    .close:hover { color: black; }
+  </style>
+</head>
+
+<body>
+  <div class="panels">
+
+    <!-- ===== Hidden stubs: every DOM ID sfg_script.js expects ===== -->
+    <div class="parameter-panel" style="display:none">
+      <div id="param-form"></div>
+      <div id="transfer-form"></div>
+      <div id="transfer-func-bode-form"></div>
+      <div id="loop-gain-form"></div>
+      <div id="loop-gain-bode-form"></div>
+      <div id="stability-params-form"></div>
+    </div>
+
+    <div class="middle-layer">
+      <div class="sfg-panel">
+
+        <!-- Hidden toolbar stubs -->
+        <div class="container-top" style="display:none">
+          <div class="column1">
+            <div id="sfg-extra">
+              <input type="checkbox" id="feature-toggle" checked>
+              <button id="refresh-button"></button>
+              <button id="return-landing"></button>
+              <div class="slider">
+                <input type="text" id="min-range" placeholder="1Hz">
+                <input type="range" step="any" min="1" max="10000" value="5000" id="frequency-slider" style="width:400px;">
+                <input type="text" id="max-range" placeholder="10000Hz">
+                <span id="frequency-value"></span>
+                <input type="submit" value="Update Range" id="update-range">
+                <div id="frequency-form"></div>
+              </div>
+              <button id="export-btn"></button>
+              <input type="file" id="upload_sfg">
+            </div>
+            <div style="height:23px;">
+              <input type="checkbox" id="simplification-toggle">
+              <button id="simplify-btn" style="display:none;"></button>
+              <button id="undo-btn" disabled></button>
+              <button id="redo-btn" disabled></button>
+            </div>
+            <div style="height:23px;">
+              <input type="checkbox" id="path-highlight-toggle">
+              <button id="rmv-hlt-btn"></button>
+              <button id="rmv-branch-btn" disabled></button>
+              <button id="edit-branch-btn" disabled></button>
+              <span id="dominant">N/A</span>
+              <span id="weak">N/A</span>
+            </div>
+          </div>
+          <div class="column2">
+            <div id="circuit-svg-small"></div>
+          </div>
+        </div>
+
+        <!-- ===== VISIBLE: The SFG graph ===== -->
+        <div class="sfg-section">
+          <h1>SFG Simulation</h1>
+          <div id="overlay-container">
+            <div id="svg-layer" aria-hidden="true"></div>
+            <div id="cy"></div>
+          </div>
+          <div id="edge-info"></div>
+        </div>
+
+        <!-- Hidden: toggle buttons, circuit panel, right layer -->
+        <div id="toggle-button-container" style="display:none">
+          <button id="toggle-svg"></button>
+          <button id="toggle-edge-labels"></button>
+        </div>
+
+        <div class="circuit-panel" style="display:none">
+          <div id="circuit-svg"></div>
+        </div>
+
+        <div class="right-layer" style="display:none">
+          <div class="transfer-panel">
+            <input type="checkbox" id="tf-toggle">
+            <div id="trans-funtion"></div>
+          </div>
+          <div class="loop-gain-panel">
+            <input type="checkbox" id="lg-toggle">
+            <div id="loop-gain"></div>
+          </div>
+          <div class="bode-section" id="bode-plot-section">
+            <div id="transfer-bode"><canvas id="transfer-bode-plot"></canvas></div>
+            <div id="loop-gain-bode"><canvas id="loop-gain-bode-plot"></canvas></div>
+            <div id="pm-plot"><canvas id="phase-margin-plot"></canvas></div>
+            <div id="bw-plot"><canvas id="bandwidth-plot"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edge-edit modal (functional – appears when "Edit Branch" is triggered) -->
+  <div id="edge-edit-modal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>Edit Edge Information</h2>
+      <form id="edge-edit-form">
+        <label for="symbolic">Symbolic:</label><br>
+        <input type="text" id="symbolic" name="symbolic" style="width:90%;"><br><br>
+        <div id="edge-edit-error" style="display:none;color:#b00020;margin-top:8px;"></div><br>
+        <label for="magnitude">Magnitude:</label>
+        <div id="magnitude-value"></div><br><br>
+        <label for="phase">Phase:</label>
+        <div id="phase-value"></div><br><br>
+        <input type="submit" value="Submit">
+      </form>
+    </div>
+  </div>
+
+  <!-- MathJax & LaTeX container -->
+  <div id="latex-script"></div>
+  <script type="text/javascript" id="MathJax-script" async
+    src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js">
+  </script>
+
+  <!-- ===== postMessage bridge for React toolbar ===== -->
+  <script>
+  (function () {
+    /**
+     * Sends the current SFG state back to the parent React app.
+     * Called after every command so the toolbar can stay in sync.
+     */
+    function reportState() {
+      var state = {
+        simplifyMode:  typeof simplify_mode  !== 'undefined' ? simplify_mode  : false,
+        highlightMode: typeof highlight_mode  !== 'undefined' ? highlight_mode : false,
+        symbolicFlag:  typeof symbolic_flag   !== 'undefined' ? symbolic_flag  : true,
+        canUndo:       typeof stack_len       !== 'undefined' ? stack_len > 0  : false,
+        canRedo:       typeof redo_len        !== 'undefined' ? redo_len > 0   : false,
+      };
+      window.parent.postMessage({ type: 'sfg-state', state: state }, '*');
+    }
+
+    window.addEventListener('message', function (event) {
+      if (!event.data || event.data.type !== 'sfg-command') return;
+      var action = event.data.action;
+
+      try {
+        switch (action) {
+          /* Toggles */
+          case 'sfg_toggle':
+            if (typeof sfg_toggle === 'function') sfg_toggle();
+            break;
+          case 'simplify_mode_toggle':
+            if (typeof simplify_mode_toggle === 'function') simplify_mode_toggle();
+            break;
+          case 'path_highlight_toggle':
+            if (typeof path_highlight_toggle === 'function') path_highlight_toggle();
+            break;
+
+          /* Simplification */
+          case 'simplify':
+            if (typeof simplify === 'function') simplify();
+            break;
+          case 'simplify_entire_graph':
+            if (typeof simplify_entire_graph === 'function') simplify_entire_graph();
+            break;
+          case 'simplify_entire_graph_trivial':
+            if (typeof simplify_entire_graph_trivial === 'function') simplify_entire_graph_trivial();
+            break;
+
+          /* Undo / Redo */
+          case 'sfg_undo':
+            if (typeof sfg_undo === 'function') sfg_undo();
+            break;
+          case 'sfg_redo':
+            if (typeof sfg_redo === 'function') sfg_redo();
+            break;
+
+          /* Highlight & branch manipulation */
+          case 'removeHighlight':
+            if (typeof removeHighlight === 'function') removeHighlight();
+            break;
+          case 'removeBranch':
+            if (typeof removeBranchLikeSimplify === 'function') removeBranchLikeSimplify();
+            break;
+          case 'editBranch':
+            if (typeof getEdgeInfo === 'function') getEdgeInfo();
+            break;
+
+          /* Display toggles */
+          case 'toggleSVG':
+            if (typeof toggleSVG === 'function') toggleSVG();
+            break;
+          case 'toggleEdgeLabels':
+            if (typeof toggleEdgeLabels === 'function') toggleEdgeLabels();
+            break;
+
+          /* Export / Import handled by React — but keep bridge just in case */
+          case 'export_sfg':
+            if (typeof export_sfg === 'function') export_sfg();
+            break;
+          case 'upload_sfg':
+            /* trigger the hidden file input */
+            var inp = document.getElementById('upload_sfg');
+            if (inp) inp.click();
+            break;
+
+          /* Refresh: re-call load_interface */
+          case 'refresh':
+            if (typeof load_interface === 'function') load_interface();
+            break;
+
+          default:
+            console.warn('[sfg_only] Unknown command:', action);
+        }
+      } catch (err) {
+        console.error('[sfg_only] Error executing command:', action, err);
+      }
+
+      /* Report state after every command (slight delay for async ops) */
+      setTimeout(reportState, 200);
+    });
+
+    /* Report initial state once the legacy script has loaded */
+    window.addEventListener('load', function () {
+      setTimeout(reportState, 500);
+    });
+
+    /* Also report periodically so toolbar stays in sync with user interactions
+       inside the iframe (e.g. clicking nodes, using edgehandles) */
+    setInterval(reportState, 1500);
+  })();
+  </script>
+</body>
+</html>

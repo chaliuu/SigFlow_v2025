@@ -9,6 +9,7 @@ from flask import (
 )
 from flask_cors import CORS
 from distutils.util import strtobool
+import os
 import tempfile
 import dill
 import json
@@ -20,7 +21,7 @@ from util.latex_parser import correlate_params_from_latex, rewrite_symbolic_to_c
 import db
 
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
 # app.config['DEBUG'] = False
 CORS(app)
 
@@ -28,6 +29,16 @@ CORS(app)
 @app.route("/favicon.ico")
 def favicon():
     return send_file("favicon.ico", mimetype="image/vnd.microsoft.icon")
+
+
+@app.route("/")
+def index():
+    return send_from_directory(app.static_folder, "index.html")
+
+
+@app.route("/legacy/<path:path>")
+def serve_legacy(path):
+    return send_from_directory("public", path)
 
 
 @app.route("/app/<path:path>")
@@ -868,6 +879,15 @@ def check_device(circuit_id):
     except Exception as e:
         # Handle unexpected errors gracefully
         return jsonify({"error": str(e)}), 400
+
+@app.errorhandler(404)
+def not_found(e):
+    # Let API routes return a proper 404
+    if request.path.startswith("/circuits"):
+        return e
+    # For all other routes, serve the React SPA so client-side routing works
+    return send_from_directory(app.static_folder, "index.html")
+
 
 if __name__ == "__main__":
     app.run(debug=True)
