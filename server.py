@@ -744,7 +744,15 @@ def import_dill_sfg(circuit_id):
     circuit = db.Circuit.objects(id=circuit_id).first()
 
     try:
-        loaded_sfg = dill.load(request.files["file"])
+        uploaded_file = request.files.get("file")
+        if uploaded_file is None:
+            abort(400, description="Missing uploaded file")
+
+        payload = uploaded_file.read()
+        if not payload:
+            abort(400, description="Uploaded file is empty")
+
+        loaded_sfg = dill.loads(payload)
 
         if not circuit:
             # Only persist the provided id when it is a valid ObjectId, otherwise
