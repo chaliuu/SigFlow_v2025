@@ -13,6 +13,7 @@ interface CircuitContextValue {
   loading: boolean;
   error: string | null;
   loadCircuit: () => Promise<void>;
+  resetCircuit: () => Promise<void>;
   patchCircuit: (params: Record<string, number>) => Promise<void>;
   symbolicFlag: boolean;
   toggleSymbolic: () => void;
@@ -61,6 +62,22 @@ export function CircuitProvider({ children }: { children: React.ReactNode }) {
     }
   }, [circuitId]);
 
+  const resetCircuitFn = useCallback(async () => {
+    if (!circuitId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const d = await api.resetCircuit(circuitId);
+      setData(d);
+      setStackLen(0);
+      setRedoLen(0);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }, [circuitId]);
+
   const patchCircuitFn = useCallback(
     async (params: Record<string, number>) => {
       if (!circuitId) return;
@@ -88,6 +105,7 @@ export function CircuitProvider({ children }: { children: React.ReactNode }) {
         loading,
         error,
         loadCircuit,
+        resetCircuit: resetCircuitFn,
         patchCircuit: patchCircuitFn,
         symbolicFlag,
         toggleSymbolic,

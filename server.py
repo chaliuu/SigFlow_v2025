@@ -97,6 +97,21 @@ def create_circuit():
         abort(400, description=str(e))
 
 
+@app.route("/circuits/<circuit_id>/reset", methods=["POST"])
+def reset_circuit(circuit_id):
+    circuit = db.Circuit.objects(id=circuit_id).first()
+    if not circuit:
+        abort(404, description="Circuit not found")
+
+    try:
+        circuit.reset_to_original()
+        circuit.save()
+        fields = request.args.get("fields", type=lambda s: s and s.split(",") or None)
+        return circuit.to_dict(fields)
+    except Exception as e:
+        abort(400, description=str(e))
+
+
 @app.route("/circuits/<circuit_id>", methods=["PATCH"])
 def patch_circuit(circuit_id):
     circuit = db.Circuit.objects(id=circuit_id).first()
