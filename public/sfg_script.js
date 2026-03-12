@@ -18,11 +18,25 @@ const EDGE_LABEL_OFFSET_STEP = 26;
 const EDGE_LABEL_WIDTH_PADDING = 72;
 const EDGE_LABEL_CHAR_FACTOR = 0.62;
 const EDGE_LABEL_WIDTH_SCALE = 0.45;
+const EDGE_LABEL_COLLISION_PADDING = 10;
+const EDGE_LABEL_COLLISION_STEP = 36;
+const EDGE_LABEL_AVOIDANCE_MAX = 360;
 
 let pendingCurveUpdate = false;
 
+
+function isCyUnavailable(cyInstance) {
+    return !cyInstance || (typeof cyInstance.destroyed === 'function' && cyInstance.destroyed());
+}
+
+function isEdgeUnavailable(edge) {
+    return !edge
+        || (typeof edge.isEdge === 'function' && !edge.isEdge())
+        || (typeof edge.removed === 'function' && edge.removed());
+}
+
 function scheduleEdgeCurveUpdate(cy) {
-    if (!cy || cy.destroyed()) {
+    if (isCyUnavailable(cy)) {
         return;
     }
 
@@ -34,7 +48,7 @@ function scheduleEdgeCurveUpdate(cy) {
 
     requestAnimationFrame(() => {
         pendingCurveUpdate = false;
-        applyEdgeCurves(cy);
+        applyEdgeCurvesWithLabelAvoidance(cy);
         syncSymbolicLabelOffsets(cy);
     });
 }
@@ -70,7 +84,7 @@ function approximateLabelWidth(text, fontSize) {
 }
 
 function measureEdgeLabelWidth(edge) {
-    if (!edge || edge.destroyed()) {
+    if (isEdgeUnavailable(edge)) {
         return 0;
     }
 
@@ -97,7 +111,7 @@ function measureEdgeLabelWidth(edge) {
 }
 
 function syncSymbolicLabelOffsets(cy) {
-    if (!symbolic_flag || !cy || cy.destroyed()) {
+    if (!symbolic_flag || isCyUnavailable(cy)) {
         return;
     }
 
@@ -110,8 +124,97 @@ function syncSymbolicLabelOffsets(cy) {
     });
 }
 
+function applyEdgeCurvesWithLabelAvoidance(cy) {
+  if (isCyUnavailable(cy)) {
+    return;
+  }
+
+  const maxIterations = 3;
+
+  for (let pass = 0; pass < maxIterations; pass += 1) {
+    applyEdgeCurves(cy);
+    const changed = updateLabelCollisionAvoidance(cy);
+    if (!changed) {
+      break;
+    }
+  }
+}
+
+function updateLabelCollisionAvoidance(cy) {
+  if (!symbolic_flag || isCyUnavailable(cy)) {
+    cy?.edges().forEach(edge => edge.removeScratch('_labelAvoidance'));
+    return false;
+  }
+
+  const labelEntries = [];
+  cy.edges().forEach(edge => {
+    if (isEdgeUnavailable(edge)) {
+      return;
+    }
+
+    const idx = edge.data('symbolicIndex');
+    if (idx === undefined || idx === null) {
+      return;
+    }
+
+    const labelEl = document.getElementById(`edge-${idx}`);
+    if (!labelEl) {
+      return;
+    }
+
+    const rect = labelEl.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      return;
+    }
+
+    labelEntries.push({ edge, rect });
+  });
+
+  const overlapCounts = new Map();
+  const pad = EDGE_LABEL_COLLISION_PADDING;
+
+  const intersects = (a, b) => {
+    return !(
+      a.right + pad < b.left - pad ||
+      a.left - pad > b.right + pad ||
+      a.bottom + pad < b.top - pad ||
+      a.top - pad > b.bottom + pad
+    );
+  };
+
+  for (let i = 0; i < labelEntries.length; i += 1) {
+    for (let j = i + 1; j < labelEntries.length; j += 1) {
+      const entryA = labelEntries[i];
+      const entryB = labelEntries[j];
+      if (!intersects(entryA.rect, entryB.rect)) {
+        continue;
+      }
+
+      overlapCounts.set(entryA.edge, (overlapCounts.get(entryA.edge) || 0) + 1);
+      overlapCounts.set(entryB.edge, (overlapCounts.get(entryB.edge) || 0) + 1);
+    }
+  }
+
+  let changed = false;
+  cy.edges().forEach(edge => {
+    if (isEdgeUnavailable(edge)) {
+      return;
+    }
+
+    const overlaps = overlapCounts.get(edge) || 0;
+    const desired = Math.min(EDGE_LABEL_AVOIDANCE_MAX, overlaps * EDGE_LABEL_COLLISION_STEP);
+    const current = edge.scratch('_labelAvoidance') || 0;
+    if (current !== desired) {
+      edge.scratch('_labelAvoidance', desired);
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 function applyEdgeLabelVisibility(cyInstance = window.cy) {
-    if (!cyInstance || cyInstance.destroyed()) {
+    if (isCyUnavailable(cyInstance)) {
         return;
     }
 
@@ -157,7 +260,7 @@ function renderSymbolicLabels() {
     }
 
     const cyInstance = window.cy;
-    if (!cyInstance || cyInstance.destroyed()) {
+    if (isCyUnavailable(cyInstance)) {
         return;
     }
 
@@ -167,7 +270,7 @@ function renderSymbolicLabels() {
 
 function renderNumericLabels() {
     const cyInstance = window.cy;
-    if (!cyInstance || cyInstance.destroyed()) {
+    if (isCyUnavailable(cyInstance)) {
         removeSymbolicLabels();
         return;
     }
@@ -178,7 +281,7 @@ function renderNumericLabels() {
 
 function renderCurrentLabelMode() {
     const cyInstance = window.cy;
-    if (!cyInstance || cyInstance.destroyed()) {
+    if (isCyUnavailable(cyInstance)) {
         return;
     }
 
@@ -437,78 +540,7 @@ function make_sfg(elements) {
   }
 
   var cy = window.cy = createSfgInstance(container, elements);
-  // Require Ctrl/Cmd + wheel for zooming. Plain wheel gestures are treated
-  // as page-scroll intents and forwarded to the parent app.
-  const SFG_MIN_ZOOM = 0.2;
-  const SFG_MAX_ZOOM = 3;
-  cy.userZoomingEnabled(false);
-  cy.minZoom(SFG_MIN_ZOOM);
-  cy.maxZoom(SFG_MAX_ZOOM);
-  cy.zoom(Math.max(SFG_MIN_ZOOM, Math.min(SFG_MAX_ZOOM, cy.zoom())));
   setupEdgeCurveCurvature(cy);
-
-    if (!container.dataset.ctrlZoomHintAttached) {
-    const hint = document.createElement('div');
-    hint.id = 'ctrl-zoom-hint';
-    hint.textContent = 'Hold Ctrl/Cmd + Scroll to zoom';
-    Object.assign(hint.style, {
-      position: 'absolute',
-      left: '12px',
-      bottom: '12px',
-      padding: '4px 8px',
-      borderRadius: '6px',
-      fontSize: '12px',
-      lineHeight: '1.2',
-      color: '#1f2937',
-      background: 'rgba(255, 255, 255, 0.88)',
-      border: '1px solid rgba(0, 0, 0, 0.12)',
-      boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
-      zIndex: '20',
-      pointerEvents: 'none',
-    });
-    container.appendChild(hint);
-    container.dataset.ctrlZoomHintAttached = 'true';
-  }
-
-  if (!container.dataset.ctrlZoomWheelHandlerAttached) {
-    container.addEventListener('wheel', function (evt) {
-      const isModifierZoom = evt.ctrlKey || evt.metaKey;
-
-      if (!isModifierZoom) {
-        if (window.parent && window.parent !== window) {
-          window.parent.postMessage({
-            type: 'sfg-scroll-intent',
-            deltaX: evt.deltaX,
-            deltaY: evt.deltaY,
-          }, '*');
-        }
-        return;
-      }
-
-      evt.preventDefault();
-
-      const zoomDirection = evt.deltaY < 0 ? 1 : -1;
-      const zoomFactor = 1 + (zoomDirection * 0.12);
-      const activeCy = window.cy;
-      if (!activeCy || activeCy.destroyed()) {
-        return;
-      }
-
-      const currentZoom = activeCy.zoom();
-      const minZoom = SFG_MIN_ZOOM;
-      const maxZoom = SFG_MAX_ZOOM;
-      const nextZoom = Math.max(minZoom, Math.min(maxZoom, currentZoom * zoomFactor));
-
-      activeCy.zoom({
-        level: nextZoom,
-        renderedPosition: {
-          x: evt.offsetX,
-          y: evt.offsetY,
-        },
-      });
-    }, { passive: false });
-    container.dataset.ctrlZoomWheelHandlerAttached = 'true';
-  }
 
   // make lines straight when aligned
   cy.edges().forEach((edge, idx) => {
@@ -600,7 +632,7 @@ function make_sfg(elements) {
 }
 
 function setupEdgeCurveCurvature(cy) {
-  if (!cy || cy.destroyed()) {
+  if (isCyUnavailable(cy)) {
     return;
   }
 
@@ -613,12 +645,12 @@ function setupEdgeCurveCurvature(cy) {
 }
 
 function applyEdgeCurves(cy) {
-  if (!cy || cy.destroyed()) {
+  if (isCyUnavailable(cy)) {
     return;
   }
 
   cy.edges().forEach((edge, idx) => {
-    if (!edge || !edge.isEdge() || edge.destroyed()) {
+    if (isEdgeUnavailable(edge)) {
       return;
     }
 
@@ -634,7 +666,7 @@ function applyEdgeCurves(cy) {
   const pairedEdges = new Map();
 
   cy.edges().forEach(edge => {
-    if (!edge.isEdge() || edge.destroyed()) {
+    if (isEdgeUnavailable(edge)) {
       return;
     }
 
@@ -748,7 +780,7 @@ function applyEdgeCurves(cy) {
   const safeRadius = Math.max(maxRadius, 1);
 
   cy.edges().forEach(edge => {
-    if (!edge.isEdge() || edge.destroyed()) {
+    if (isEdgeUnavailable(edge)) {
       return;
     }
 
@@ -815,7 +847,8 @@ function applyEdgeCurves(cy) {
       return;
     }
 
-    let magnitude = EDGE_BASE_CURVE_DISTANCE;
+    const labelAvoidance = edge.scratch('_labelAvoidance') || 0;
+    let magnitude = EDGE_BASE_CURVE_DISTANCE + labelAvoidance;
     magnitude += spreadMagnitude * (EDGE_CURVE_SPACING * 0.6);
     magnitude += Math.abs(combinedOffset) * (EDGE_CURVE_SPACING * 0.4);
     magnitude += Math.abs(pairSpread) * (EDGE_CURVE_SPACING * 1.1);
@@ -1128,6 +1161,292 @@ function removeHighlight(){
 }
 
 
+
+
+
+// function dum2_editBranch() {
+//     console.log("editBranch is called");
+
+//     let cy = window.cy;
+//     // let updates = new Array(cy.edges().length)
+//     // let edges = new Array(cy.edges().length)
+
+//     console.log("printing all edges: ", cy.edges())
+//     // console.log("print edges: ", edges)
+
+//     // Event listener for right-click on edges
+//     cy.edges().forEach((edge, idx) => {
+//         edge.on('cxttap', function(evt) {
+//             console.log("evt target: ", evt.target)
+//             console.log("evt: ", evt)
+
+//             // Retrieve the LaTeX code for the selected edge
+//             let latexCode = edge_symbolic_label[idx];
+//             console.log("LaTeX code for selected edge:", latexCode);
+//             console.log("Idx:", idx);
+
+//             // Display popup window for editing LaTeX code
+//             let modifiedLatexCode = editLatexCode(latexCode, idx);
+
+//             // Check if the user made any modifications
+//             if (modifiedLatexCode !== null) {
+//                 // Update the LaTeX content of the Edge
+//                 console.log("Modified LaTeX code:", modifiedLatexCode);
+//                 // updateEdgeLabel(edge, modifiedLatexCode, idx);
+//             }
+//         });
+        
+//     });
+
+//     // MathJax.typeset();
+
+//     cy.style().selector('edge').css({ 'content': '' }).update();
+//     const time2 = new Date();
+//     let time_elapse = (time2 - time1) / 1000;
+//     console.log("editBranch SFG loading time: " + time_elapse + " seconds");
+// }
+
+
+// function dum_editBranch() {
+//     console.log("editBranch is called");
+
+//     let cy = window.cy;
+//     let updates = new Array(cy.edges().length)
+//     let edges = new Array(cy.edges().length)
+
+//     console.log("printing all edges: ", cy.edges())
+//     console.log("print edges: ", edges)
+
+//     // Event listener for right-click on edges
+//     cy.edges().forEach((edge, idx) => {
+//         edge.on('cxttap', function(evt) {
+//             console.log("evt target: ", evt.target)
+//             console.log("evt: ", evt)
+
+//             // Retrieve the LaTeX code for the selected edge
+//             let latexCode = edge_symbolic_label[idx];
+//             console.log("LaTeX code for selected edge:", latexCode);
+//             console.log("Idx:", idx);
+
+//             // Display popup window for editing LaTeX code
+//             let modifiedLatexCode = editLatexCode(latexCode, idx);
+
+//             // Check if the user made any modifications
+//             if (modifiedLatexCode !== null) {
+//                 // Update the LaTeX content of the Edge
+//                 console.log("Modified LaTeX code:", modifiedLatexCode);
+//                 updateEdgeLabel(edge, modifiedLatexCode, idx);
+//             }
+//         });
+//     });
+
+//     // Function to update the LaTeX content of the edge
+//     function updateEdgeLabel(edge, latexCode) {
+//         console.log("Updating edge label:", edge, latexCode);
+        
+//         // Find the index of the edge in the edges array
+//         let index = edges.findIndex(item => item.edge === edge);
+
+//         // If the edge is found in the edges array
+//         if (index !== -1) {
+//             // Destroy the existing popper
+//             edges[index].popper.destroy();
+
+//             // Create a new popper with the modified LaTeX code
+//             let newPopper = edge.popper({
+//                 content: () => {
+//                     let div = document.createElement('div');
+//                     div.classList.add('label');
+//                     div.innerHTML = '$$' + latexCode + '$$';
+//                     console.log("Inside edge.popper content:()");
+//                     return div;
+//                 },
+//                 popper: {
+//                     modifiers: {
+//                         preventOverflow: {
+//                             enabled: true,
+//                             boundariesElement: document.getElementsByClassName('sfg-section')[0],
+//                             padding: 5
+//                         },
+//                         hide: {
+//                             enabled: true,
+//                         }
+//                     }
+//                 }
+//             });
+
+//             // Update the popper reference in the edges array
+//             edges[index].popper = newPopper;
+//         } else {
+//             // Create a new popper and add it to the edges array
+//             let newPopper = edge.popper({
+//                 content: () => {
+//                     let div = document.createElement('div');
+//                     div.classList.add('label');
+//                     div.innerHTML = '$$' + latexCode + '$$';
+//                     console.log("Inside edge.popper content:()");
+//                     return div;
+//                 },
+//                 popper: {
+//                     modifiers: {
+//                         preventOverflow: {
+//                             enabled: true,
+//                             boundariesElement: document.getElementsByClassName('sfg-section')[0],
+//                             padding: 5
+//                         },
+//                         hide: {
+//                             enabled: true,
+//                         }
+//                     }
+//                 }
+//             });
+
+//             edges.push({ edge: edge, popper: newPopper });
+//         }
+//     }
+
+//     MathJax.typeset();
+
+//     cy.style().selector('edge').css({ 'content': '' }).update();
+//     const time2 = new Date();
+//     let time_elapse = (time2 - time1) / 1000;
+//     console.log("editBranch SFG loading time: " + time_elapse + " seconds");
+// }
+
+
+// ------------------------------------------------------------------------------------------------
+
+// // Function to display popup window with LaTeX code for editing
+// function editLatexCode(latexCode) {
+//     // Open a popup window or modal dialog
+//     let userInput = prompt("Edit LaTeX code:", latexCode);
+
+//     // Return the modified LaTeX code entered by the user
+//     return userInput;
+// }
+
+// // edit the selected branch on the SFG
+// function editBranch() {
+//     console.log("editBranch is called");
+
+//     let cy = window.cy;
+
+//     let updates = new Array(cy.edges().length)
+//     let edges = new Array(cy.edges().length)
+
+
+
+//     // Event listener for right-click on edges
+//     cy.edges().forEach((edge, idx) => {
+//         edge.on('cxttap', function(evt){
+//             // Retrieve the LaTeX code for the selected edge
+//             let latexCode = edge_symbolic_label[idx];
+//             console.log("LaTeX code for selected edge:", latexCode);
+
+//             // Display popup window for editing LaTeX code
+//             let modifiedLatexCode = editLatexCode(latexCode);
+
+//             // Check if the user made any modifications
+//             if (modifiedLatexCode !== null) {
+//                 // Send the modified LaTeX code back to the circuit
+//                 // Replace this line with the appropriate code to send the modified LaTeX code back to the circuit
+//                 console.log("Modified LaTeX code:", modifiedLatexCode);
+//             }
+//         });
+        
+//         edges[idx] = edge.popper({
+//             content: () => {
+//             let div = document.createElement('div');
+
+//             //div.classList.add('popper-div');
+//             div.id = 'edge-' + idx;
+//             div.style.cssText = `font-size:${cy.zoom()*16 + 'px'};font-weight:400;`
+            
+//             div.classList.add('label')
+        
+//             div.innerHTML = '$$' + modifiedLatexCode + '$$';
+//             //div.innerHTML = '$$\\frac{y}{2x} + C$$';
+
+
+        
+//             //document.getElementById('magnitudes').appendChild(div);
+//             //document.body.appendChild(div);
+//             document.getElementsByClassName('sfg-section')[0].appendChild(div);
+//             return div;
+//             },
+//             popper: {
+//                 modifiers: {
+//                     preventOverflow: {
+//                         enabled: true,
+//                         boundariesElement: document.getElementsByClassName('sfg-section')[0],
+//                         padding: 5
+//                     },
+//                     hide:  {
+//                         enabled: true,
+//                     }
+//             }
+//         }})
+
+//         updates[idx] = () => {
+//             edges[idx].update();
+//             edge = document.querySelector(`#edge-${idx}`);
+//             if (edge) {
+//                 edge.style.fontSize = cy.zoom()*16 + 'px';
+//             }
+//         }
+          
+//         edge.connectedNodes().on('position', updates[idx]);
+        
+//         cy.on('pan zoom resize', updates[idx]);
+
+//     });
+
+//     MathJax.typeset();
+
+//     cy.style().selector('edge').css({'content': ''}).update()
+//     const time2 = new Date()
+//     let time_elapse = (time2 - time1)/1000
+//     console.log("editBranch SFG loading time: " + time_elapse + " seconds")
+// }
+
+
+    // --------------------------------------------------------------------------------------------------------------------
+
+
+    // cy.on('cxttap', 'edge', function(evt) {
+    //     var edge = evt.target;
+    //     var edgeData = edge.data(); // Get edge data, which includes the value
+
+    //     // print the edge
+    //     console.log('editing Edge:', edge);
+    //     // print the edge data
+    //     console.log('editing Original Edge Data:', edgeData);
+    //     // print the latex data
+    //     console.log('editing Original Edge Latex:', edgeData.latex);
+
+    //     // Create a custom HTML prompt
+    //     // Create a multiline message for the prompt
+    //     var message = `Original LaTeX:\n${edgeData.latex}\n\nEnter new LaTeX:`;
+
+    //     // Display prompt with original LaTeX and input field for new LaTeX
+    //     var newLatex = prompt(message);
+
+    //     // Check if user entered a new LaTeX content
+    //     if (newLatex !== null && newLatex.trim() !== '') {
+    //         // Update edge's data with new LaTeX content
+    //         edge.data('latex', newLatex);
+    //         console.log('Edge LaTeX updated:', newLatex);
+    //     }
+    // });
+// }
+
+// Removes the selected branch from the diagram
+
+function removeLatexCode(latexCode, idx) {
+    edge_symbolic_label[idx] = '';
+}
+
+
 // Function to initialize event listeners for edges
 function initializeEdgeHover() {
     console.log("********** initializeEdgeHover is called **********")
@@ -1301,7 +1620,7 @@ function removeBranchLikeSimplify() {
     cy.style().selector('edge').css({ 'content': '' }).update();
     const time2 = new Date();
     let time_elapse = (time2 - time1) / 1000;
-    console.log("Branch SFG loading time: " + time_elapse + " seconds");
+    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
 }
 
 function removeBranchLikeSimplify_request(params) {
@@ -1429,21 +1748,6 @@ function openEditModal(data) {
     var magnitudeDisplay = document.getElementById("magnitude-value");
     var phaseDisplay = document.getElementById("phase-value");
 
-    // ✅ ADD: error display helper (make sure your HTML has <div id="edge-edit-error"></div>)
-    function setEdgeEditError(msg) {
-        const el = document.getElementById("edge-edit-error");
-        if (!el) {
-            console.warn("Missing #edge-edit-error element in DOM");
-            return;
-        }
-        el.textContent = msg || "";
-        el.style.display = msg ? "block" : "none";
-    }
-
-    // ✅ ADD: clear any previous error when opening
-    setEdgeEditError("");
-
-
     console.log('Data:', data);
 
     // Populate the input fields with data
@@ -1491,19 +1795,9 @@ function openEditModal(data) {
         console.log('tgt:', data.data.target);
         console.log('symbolic:', data.data.weight.symbolic);
 
-        // ✅ Clear any previous error before attempting update
-        setEdgeEditError("");
+        new_editBranchLikeSimplify(data.data.source, data.data.target, data.data.weight.symbolic);
 
-        // ✅ Call server and close only on success; show message on error
-        new_editBranchLikeSimplify(data.data.source, data.data.target, data.data.weight.symbolic)
-            .then(() => {
-                modal.style.display = "none";   // close only if PATCH succeeded
-            })
-            .catch((err) => {
-                setEdgeEditError(err.message);  // show backend error like "Invalid input 'R_{2}'"
-                console.log("Setting edge-edit-error to:", err.message);
-            });
-
+        modal.style.display = "none";
     };
 }
 
@@ -1511,7 +1805,7 @@ function openEditModal(data) {
 // Function to validate user input against valid keys
 function validateInput(userInput) {
     // console.log("keys: ", keys);
-     console.log("latex_keys: ", latex_keys);
+    // console.log("latex_keys: ", latex_keys);
     // userInput = userInput.toLowerCase();
     for (let latex_key of latex_keys) {
         // return false if userinput does not include a valid key or is not an integer
@@ -1542,6 +1836,42 @@ function editLatexCode(latexCode, idx) {
     }
 }
 
+function editBranchLikeSimplify() {
+    console.log("editBranch is called");
+    let cy = window.cy;
+    function edgeTapHandler(evt){
+        let edge = evt.target;
+
+        console.log("requesting branch edit")
+
+        let form_data = {}
+        form_data.source = edge.data('source');
+        form_data.target = edge.data('target');
+        form_data.symbolic = 1;
+        console.log("edge id:", edge.id());
+        console.log("edge data:", edge.data());
+        console.log("form_data:", form_data);
+
+
+        update_edge_new(form_data);
+
+        document.getElementById("edit-branch-btn").disabled = false;
+        console.log('edge (edge id) removed:', edge.id());
+        cy.off('tap', 'edge', edgeTapHandler);
+        console.log("edge_symbolic_label:", edge_symbolic_label);
+        reset_mag_labels();
+    }
+
+    // Attach the event listener to edges for click
+    cy.on('tap', 'edge', edgeTapHandler);
+    document.getElementById("edit-branch-btn").disabled = true;
+
+    // Update cy style and log loading time
+    cy.style().selector('edge').css({ 'content': '' }).update();
+    const time2 = new Date();
+    let time_elapse = (time2 - time1) / 1000;
+    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
+}
 
 function new_editBranchLikeSimplify(source, target, symbolic) {
     console.log("---------- new_editBranchLikeSimplify is called");
@@ -1552,9 +1882,92 @@ function new_editBranchLikeSimplify(source, target, symbolic) {
     form_data.symbolic = symbolic;
     console.log("form_data:", form_data);
 
-    return update_edge_new(form_data);
+    update_edge_new(form_data);
+
+    // reset_mag_labels();
+
+    // Update cy style and log loading time
+    // cy.style().selector('edge').css({ 'content': '' }).update();
+    const time2 = new Date();
+    let time_elapse = (time2 - time1) / 1000;
+    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
 }
 
+// Function to edit the selected branch on the SFG
+function editBranch() {
+    console.log("editBranch is called");
+    let cy = window.cy;
+    function edgeTapHandler(evt) {
+        // console.log("evt target: ", evt.target)
+        // console.log("evt: ", evt)
+
+        console.log("BEFORE EDIT: edge_symbolic_label: ", edge_symbolic_label);
+
+
+        // Retrieve the LaTeX code for the selected edge
+        let edge = evt.target;
+        let idx = cy.edges().indexOf(edge);
+        let latexCode = edge_symbolic_label[idx];
+        console.log("LaTeX code for selected edge:", latexCode);
+        console.log("Idx:", idx);
+
+        // print edge input, output, and weight
+        console.log("edge source: ", edge.data('source'));
+        console.log("edge target: ", edge.data('target'));
+        console.log("edge weight: ", edge.data('weight'));
+        console.log("edge weight symbolic: ", edge.data('weight_symbolic'))
+        console.log("edge id: ", edge.id());
+        // print all edge data
+        console.log("edge data: ", edge.data());
+
+        // Display popup window for editing LaTeX code
+        let modifiedLatexCode = editLatexCode(latexCode, idx);
+        document.getElementById("edit-branch-btn").disabled = false;
+        // print all edge_symbolic_label
+        console.log("AFTER EDIT: edge_symbolic_label: ", edge_symbolic_label);
+
+        // Update the keys on parameters based on the modifiedLatexCode
+        
+
+        // sfg_patch_request(idx, latexCode, edge.data('source'), edge.data('target'));
+
+        // most recent edit
+        // update_edge(edge.data('source'), edge.data('target'), modifiedLatexCode);
+
+        // try using simplify() method
+        let form_data = {}
+        form_data.source = edge.data('source');
+        form_data.target = edge.data('target');
+        update_edge()
+
+
+        // Check if the user made any modifications
+        if (modifiedLatexCode !== null) {
+            // Update the LaTeX content of the Edge
+            console.log("Modified LaTeX code:", modifiedLatexCode);
+            
+            // // update the sfg frontend and rerender
+            // edge.data('weight', modifiedLatexCode);
+            // cy.style().selector('edge').css({ 'content': '' }).update();
+            // window.cy.style().selector('edge').css({'content': 'data(weight)'}).update();
+            // display_mag_sfg();
+            reset_mag_labels();
+        }
+
+        // Remove the event listener after it's triggered once
+        cy.off('tap', 'edge', edgeTapHandler);
+    }
+
+    // Attach the event listener to edges for click
+    cy.on('tap', 'edge', edgeTapHandler);
+    document.getElementById("edit-branch-btn").disabled = true;
+
+    // Update cy style and log loading time
+    cy.style().selector('edge').css({ 'content': '' }).update();
+    const time2 = new Date();
+    let time_elapse = (time2 - time1) / 1000;
+    console.log("editBranch SFG loading time: " + time_elapse + " seconds");
+}
 
 function  display_mag_sfg() {
     let cy = window.cy;
@@ -1621,6 +2034,7 @@ function  display_mag_sfg() {
 
     cy.style().selector('edge').css({'content': ''}).update()
     applyEdgeLabelVisibility(cy);
+    scheduleEdgeCurveUpdate(cy);
     const time2 = new Date()
     let time_elapse = (time2 - time1)/1000
     console.log("display_mag_sfg SFG loading time: " + time_elapse + " seconds")
@@ -2064,42 +2478,75 @@ function make_transfer_func_panel() {
 }
 
 function update_edge_new(params) {
-  console.log("********** running update_edge_new **********");
-  const url = new URL(`${baseUrl}/circuits/${circuitId}/update_edge_new`);
+    console.log("********** running update_edge_new **********")
+    var url = new URL(`${baseUrl}/circuits/${circuitId}/update_edge_new`);
+    // var url = `${baseUrl}/circuits/${circuitId}/update_edge_new`;
+    
+    console.log("Final URL with parameters:", url.href);
+    console.log("sending PATCH request to:", url);
 
-  console.log("sending PATCH request to:", url.href);
+    fetch(url, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        mode: 'cors',
+        credentials: 'same-origin',
+        body: JSON.stringify(params)
+    })
+    .then(response => {
+        if (!response.ok) {
+            // If response is not ok (i.e., in error status range), reject the promise
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        // If response is ok, return JSON promise
+        return response.json();
+    })
+    .then(data => {
+        console.log("success!");
+        update_frontend(data);
+        reset_mag_labels();
+    })
+    .catch(error => {
+        console.error('update_edge error!:', error);
+        console.log('update_edge Full response:', error.response);
+    });
+}
 
-  // ✅ RETURN the fetch promise so callers can .then/.catch it
-  return fetch(url, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    mode: "cors",
-    credentials: "same-origin",
-    body: JSON.stringify(params),
-  }).then(async (response) => {
-    // ✅ Always read the body (even on error)
-    let payload = null;
-    try {
-      payload = await response.json(); // backend returns JSON for errors too
-    } catch (e) {
-      payload = null;
-    }
+function update_edge(input_node, output_node, symbolic_value) {
+    var url = new URL(`${baseUrl}/circuits/${circuitId}/update_edge`);
+    params = {input_node: input_node, output_node: output_node, symbolic_value: symbolic_value}
+    console.log("URL before appending parameters:", url.href);
+    Object.keys(params).forEach(key => {
+        const value = params[key].toString();
+        url.searchParams.append(key, value);
+    });
+    console.log("Final URL with parameters:", url.href);
 
-    if (!response.ok) {
-      // ✅ Use backend message if present
-      const msg =
-        (payload && (payload.error || payload.message)) ||
-        `HTTP error! Status: ${response.status}`;
-
-      throw new Error(msg);
-    }
-
-    // ✅ success
-    console.log("success!");
-    update_frontend(payload);
-    reset_mag_labels();
-    return payload;
-  });
+    fetch(url, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        mode: 'cors',
+        credentials: 'same-origin',
+        body: JSON.stringify(params)
+    })
+    .then(response => {
+        if (!response.ok) {
+            // If response is not ok (i.e., in error status range), reject the promise
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        // If response is ok, return JSON promise
+        return response.json();
+    })
+    .then(data => {
+        console.log("success!");
+    })
+    .catch(error => {
+        console.error('update_edge error!:', error);
+        console.log('update_edge Full response:', error.response);
+    });
 }
 
 async function tf_toggle() {
@@ -3769,55 +4216,46 @@ function import_sfg_request(sfg_obj) {
 }
 
 function upload_dill_sfg() {
-    // TODO add error checking (i.e. is file in correct json format)
-    var files = document.getElementById('upload_sfg').files;
-    console.log(files);
-    if (files.length <= 0) {
+    const files = document.getElementById('upload_sfg').files;
+    if (!files || files.length <= 0) {
         return false;
     }
-    var dill_sfg = files[0];
-    console.log(dill_sfg);
-    var fr = new FileReader();
-    var sfg_obj;
-    fr.onload = function(e) { 
-        console.log("IMPORTED dill obj is: ", dill_sfg)
-        //console.log(JSON.parse(JSON.stringify(sfg_obj.sfg.elements)))
-        // TODO connect to backend to convert sfg JSON to sfg graph and binary field
-        import_dill_sfg(dill_sfg)
-    }
 
-    fr.readAsText(files.item(0));
+    const dill_sfg = files[0];
+    console.log('Uploading dill SFG file:', dill_sfg && dill_sfg.name);
+
+    return import_dill_sfg(dill_sfg);
 }
 
 function import_dill_sfg(dill_sfg) {
     let url = new URL(`${baseUrl}/circuits/${circuitId}/import`)
     console.log(circuitId)
-    var formData = new FormData();
+    const formData = new FormData();
     formData.append("file", dill_sfg);
 
-    fetch(url, {
+    return fetch(url, {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(message => {
+                throw new Error(message || 'Failed to import SFG file');
+            });
+        }
+
+        return response.json();
+    })
     .then(data => {
-        // TODO update_frontend(data);
-        //or update_frontend(sfg_obj, true); ?
-       
-        
-        data_json = JSON.parse(JSON.stringify(data));
-        // data_json.sfg = sfg_obj;
-        
-        console.log("modified data is: ");
-        console.log(data_json);
-        update_frontend(data_json); //buggy
-        
-    
-        // update_frontend(sfg_obj, true);
+        console.log('Imported SFG response:', data);
+        update_frontend(data);
+        load_interface();
     })
     .catch(error => {
-        console.log(error)
-    })}
+        console.log(error);
+        alert('Failed to import SFG file.');
+    })
+}
 
 function stability_parameter_panel() {
 
