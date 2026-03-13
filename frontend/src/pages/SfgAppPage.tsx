@@ -119,7 +119,12 @@ export default function SfgAppPage() {
           {/* Quick-action buttons */}
           <Stack direction="row" spacing={0.5}>
             <Tooltip title="Refresh circuit data">
-              <IconButton size="small" onClick={() => loadCircuit()}>
+              <IconButton size="small" onClick={() => {
+                loadCircuit();
+                if (iframeRef.current?.contentWindow) {
+                  iframeRef.current.contentWindow.postMessage({ type: 'sfg-command', action: 'refresh' }, '*');
+                }
+              }}>
                 <RefreshIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -139,7 +144,11 @@ export default function SfgAppPage() {
                     const file = e.target.files?.[0];
                     if (file && circuitId) {
                       await api.importSfgFile(circuitId, file);
-                      loadCircuit();
+                      await loadCircuit();
+                      if (iframeRef.current?.contentWindow) {
+                        iframeRef.current.contentWindow.postMessage({ type: 'sfg-command', action: 'refresh' }, '*');
+                      }
+                      e.target.value = '';
                     }
                   }}
                 />

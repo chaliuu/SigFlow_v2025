@@ -9,19 +9,17 @@ from flask import (
 )
 from flask_cors import CORS
 from distutils.util import strtobool
-import os
 import tempfile
 import dill
+import io
 import json
 import sympy
-import re
-from util.latex_parser import correlate_params_from_latex, rewrite_symbolic_to_canonical
-
+from mongoengine.errors import ValidationError
 
 import db
 
 
-app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
+app = Flask(__name__)
 # app.config['DEBUG'] = False
 CORS(app)
 
@@ -29,16 +27,6 @@ CORS(app)
 @app.route("/favicon.ico")
 def favicon():
     return send_file("favicon.ico", mimetype="image/vnd.microsoft.icon")
-
-
-@app.route("/")
-def index():
-    return send_from_directory(app.static_folder, "index.html")
-
-
-@app.route("/legacy/<path:path>")
-def serve_legacy(path):
-    return send_from_directory("public", path)
 
 
 @app.route("/app/<path:path>")
@@ -70,19 +58,6 @@ def create_circuit():
 
     schematic = request.json.get("schematic")
     op_point_log = request.json.get("op_point_log")
-
-    # Debug statements for visibility
-    if schematic:
-        print(f"DEBUG: Schematic length: {len(schematic)}")
-        print(f"DEBUG: Schematic first 100 chars: {repr(schematic[:100])}")
-    else:
-        print("DEBUG: schematic is None or empty")
-    
-    if op_point_log:
-        print(f"DEBUG: Operating Point Analysis Log File length: {len(op_point_log)}")
-        print(f"DEBUG: Operating Point Analysis Log File first 100 chars: {repr(op_point_log[:100])}")
-    else:
-        print("DEBUG: op_point_log is None or empty")
 
     try:
         circuit = db.Circuit.create(name, netlist, schematic, op_point_log)
@@ -157,55 +132,136 @@ def update_edge_new(circuit_id):
     if not input_node or not output_node or not symbolic:
         abort(400, description="Missing source, target, or symbolic data")
 
-
-    fields = request.args.get("fields", type=lambda s: s and s.split(","))
-
-
-    circuit_dict = circuit.to_dict(fields)
-    params = circuit_dict.get("parameters", {})
-    allowed = set(params.keys())
-    #Finds the circuit parameters that are accepted as input
-
-    found, unknown = correlate_params_from_latex(symbolic, allowed)
-    #Confirms that the branch that is being edited contains circuit parameters
-
-    print("Found:", found)
-    print("Unknown:", unknown)
-
-    symbolic_canonical = rewrite_symbolic_to_canonical(symbolic, allowed)
-    #Converts LaTeX to Python equation
-
-    print("Original symbolic:", symbolic)
-    print("Canonical symbolic:", symbolic_canonical)
-
-    if unknown:
-        print("User inputted invalid edge value in update_edge_new:", symbolic)
-        return jsonify(error=f"Invalid input: '{symbolic}'. Please ensure that the input is in LaTeX format."), 400
-
-
-    
     try:
         print("Attempting to edit edge with the following data:")
-        print(f"Source: {input_node}, Target: {output_node}, Symbolic: {symbolic_canonical}")
+        print(f"Source: {input_node}, Target: {output_node}, Symbolic: {symbolic}")
 
         # Call the edit_edge function, print debug info before and after
         print("Calling circuit.edit_edge()...")
-        circuit.edit_edge(input_node, output_node, symbolic_canonical)
+        circuit.edit_edge(input_node, output_node, symbolic)
         print("Successfully called circuit.edit_edge()")
 
         print("Saving circuit...")
         circuit.save()
         print("Circuit saved successfully")
 
-        fields = request.args.get("fields", type=lambda s: s and s.split(","))
-        circuit_dict = circuit.to_dict(fields)
+        fields = request.args.get("fields", type=lambda s: s and s.split(",") or None)
         # print fields
         print("fields: " + str(fields))
-        print(circuit_dict)
-        return circuit_dict
+        print(circuit.to_dict(fields))
+        return circuit.to_dict(fields)
 
     except Exception as e:
         abort(400, description=str(e))
+
+
+# @app.route('/circuits/<circuit_id>/edges', methods=['DELETE'])
+# def remove_edge(circuit_id):
+#     circuit = db.Circuit.objects(id=circuit_id).first()
+#     if not circuit:
+#         abort(404, description='Circuit not found')
+
+#     try:
+#         print("trying remove_edge server side")
+#         print("request: " + str(request))
+#         data = request.get_json()
+#         source = data.get('source')
+#         target = data.get('target')
+
+#         # Validate the data
+#         if not source or not target:
+#             raise ValueError('Invalid parameters.')
+
+#         # print all edges of circuit
+#         print("circuit edges: " + str(circuit.edges))
+#         # get edge from circuit
+#         edge = circuit.get_edge(source, target)
+#         print("edge: " + str(edge))
+
+#         # # Deserialize the SFG
+#         # sfg = dill.loads(circuit.sfg)
+
+#         # # Remove the specified edge
+#         # if sfg.has_edge(source, target):
+#         #     sfg.remove_edge(source, target)
+#         # else:
+#         #     raise ValueError('Edge not found in the graph.')
+
+#         # # Serialize the updated SFG back to the binary field
+#         # circuit.sfg = dill.dumps(sfg)
+#         # circuit.save()
+
+#         # # Fetch the updated SFG elements
+#         # updated_sfg_elements = {
+#         #     'nodes': [{'data': {'id': node, 'name': node}} for node in sfg.nodes],
+#         #     'edges': []
+#         # }
+#         # for src, dst in sfg.edges:
+#         #     weight = sfg.edges[src, dst]['weight']
+#         #     symbolic = weight['symbolic']
+#         #     if isinstance(symbolic, sympy.Basic):
+#         #         symbolic = sympy.latex(symbolic)
+#         #     updated_sfg_elements['edges'].append({
+#         #         'data': {
+#         #             'id': f'{src}_{dst}',
+#         #             'source': src,
+#         #             'target': dst,
+#         #             'weight': {
+#         #                 'symbolic': symbolic,
+#         #                 'magnitude': weight['magnitude'],
+#         #                 'phase': weight['phase']
+#         #             }
+#         #         }
+#         #     })
+
+#         # # unimplemented edge removal logic
+#         # # # Logic to remove the edge from the database
+#         # # # Example: Circuit.objects.filter(id=circuit_id).update(pull__edges={'source': source, 'target': target})
+#         # # Logic to remove the edge from the database
+#         # # Assuming your edge structure is like {'source': 'node1', 'target': 'node2'}
+#         # circuit.update(pull__edges={'source': source, 'target': target})
+
+#         # # Fetch the updated circuit
+#         # circuit.reload()
+
+#         # # Extract the updated SFG elements
+#         # updated_sfg_elements = {
+#         #     'nodes': [{'data': node.to_dict()} for node in circuit.nodes],
+#         #     'edges': [{'data': edge.to_dict()} for edge in circuit.edges]
+#         # }
+
+#         # # # Simulate the updated SFG elements to send back to the frontend
+#         # # updated_sfg_elements = {
+#         # #     'nodes': [],  # Add your updated nodes here
+#         # #     'edges': []   # Add your updated edges here
+#         # # }
+
+#         # # # return jsonify({"message": "Edge removed successfully", "sfg": {"elements": updated_sfg_elements}}), 200
+
+
+#         # existing response update logic
+#         fields = request.args.get(
+#             'fields',
+#             type=lambda s: s and s.split(',') or None
+#         )
+
+#         # print fields
+#         # print("fields: " + str(fields))
+#         # print(circuit.to_dict(fields))
+
+#         return circuit.to_dict(fields)
+#         # return jsonify({
+#         #     "message": "Edge removed successfully",
+#         #     "sfg": {"elements": updated_sfg_elements}
+#         # }), 200
+
+#     except ValueError as e:
+#         app.logger.error(f"ValueError: {e}")
+#         return jsonify({"error": str(e)}), 400  # Return 400 Bad Request for client-side errors
+#     except Exception as e:
+#         app.logger.error(f"Error removing edge in circuit {circuit_id}: {e}")
+#         return jsonify({"error": "Internal Server Error"}), 500
+
 
 # note to self: remove_edge is old
 # remove_branch is new and uses similar logic to simplify_circuit
@@ -266,7 +322,36 @@ def get_edge_info(circuit_id):
         print("fields: " + str(fields))
         print(circuit.to_dict(fields))
 
-        
+        # for edge in circuit.sfg.elements.edges:
+        #     print("iterating edge", circuit.sfg.elements.edges[edge])
+        # print("-----first edge", circuit.to_dict(fields))
+
+        # print("before edge = next(..........)")
+        # edge = "test"
+        # Find the edge with the matching source and target
+        # for e in circuit.sfg.elements['edges']:
+        #     if e['data']['source'] == source and e['data']['target'] == target:
+        #         edge = e
+        #         break
+
+        # print("edge:", edge)
+        # edge = next(
+        #     (edge for edge in circuit.sfg['elements']['edges']
+        #      if edge['data']['source'] == source and edge['data']['target'] == target), None
+        # )
+        # edge = next((edge for edge in circuit.sfg['elements']['edges'] if edge['data']['source'] == source and edge['data']['target'] == target), None)
+        # print("edge: " + str(edge))
+
+        # if not edge:
+        #     print("edge not found")
+        #     return jsonify(error="Edge not found"), 404
+
+        # weight = edge['data']['weight']
+        # print("weight: " + str(weight))
+
+        # Finally specify the application/JSON format for the response to prevent 400 Error Bad Request
+        # response = jsonify(weight)
+
         circuit_data = circuit.to_dict(fields)
 
         # Extracting the list of edges
@@ -741,10 +826,25 @@ def get_sfg(circuit_id):
 # TODO import needs implementation
 @app.route("/circuits/<circuit_id>/import", methods=["POST"])
 def import_dill_sfg(circuit_id):
-    circuit = db.Circuit.objects(id=circuit_id).first()
+    try:
+        circuit = db.Circuit.objects(id=circuit_id).first()
+    except (ValidationError, TypeError, ValueError):
+        circuit = None
 
     try:
-        loaded_sfg = dill.load(request.files["file"])
+        uploaded_file = request.files.get("file")
+        if uploaded_file is None:
+            abort(400, description="No file was uploaded")
+
+        payload = uploaded_file.read()
+        if not payload:
+            abort(400, description="Uploaded file is empty")
+
+        try:
+            loaded_sfg = dill.loads(payload)
+        except Exception:
+            # Compatibility fallback for legacy pickle payloads.
+            loaded_sfg = dill.load(io.BytesIO(payload))
 
         if not circuit:
             # Only persist the provided id when it is a valid ObjectId, otherwise
@@ -879,15 +979,6 @@ def check_device(circuit_id):
     except Exception as e:
         # Handle unexpected errors gracefully
         return jsonify({"error": str(e)}), 400
-
-@app.errorhandler(404)
-def not_found(e):
-    # Let API routes return a proper 404
-    if request.path.startswith("/circuits"):
-        return e
-    # For all other routes, serve the React SPA so client-side routing works
-    return send_from_directory(app.static_folder, "index.html")
-
 
 if __name__ == "__main__":
     app.run(debug=True)
