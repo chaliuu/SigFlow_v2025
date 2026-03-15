@@ -121,10 +121,12 @@ export default function SfgAppPage() {
             <Tooltip title="Reset circuit">
               <IconButton size="small" onClick={async () => {
                 await resetCircuit();
-                iframeRef.current?.contentWindow?.postMessage(
-                  { type: 'sfg-command', action: 'refresh' },
-                  '*',
-                );
+                if(iframeRef.current?.contentWindow) {
+                  iframeRef.current.contentWindow.postMessage(
+                    { type: 'sfg-command', action: 'refresh' },
+                    '*'
+                  );
+                }
               }}>
                 <RefreshIcon fontSize="small" />
               </IconButton>
@@ -145,7 +147,11 @@ export default function SfgAppPage() {
                     const file = e.target.files?.[0];
                     if (file && circuitId) {
                       await api.importSfgFile(circuitId, file);
-                      loadCircuit();
+                      await loadCircuit();
+                      if (iframeRef.current?.contentWindow) {
+                        iframeRef.current.contentWindow.postMessage({ type: 'sfg-command', action: 'refresh' }, '*');
+                      }
+                      e.target.value = '';
                     }
                   }}
                 />
