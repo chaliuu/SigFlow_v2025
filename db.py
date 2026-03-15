@@ -58,6 +58,8 @@ class Circuit(Document):
     op_point_log = StringField()
     parameters = DictField()
     sfg = BinaryField()
+    original_sfg = BinaryField()
+    original_parameters = DictField()
     transfer_functions = EmbeddedDocumentListField(TransferFunction)
     loop_gain = EmbeddedDocumentField(LoopGainFunction)
     created = DateTimeField(default=datetime.utcnow)
@@ -164,6 +166,7 @@ class Circuit(Document):
         # such, they are not constructed until they are accessed.
 
         # Initialize the underlying document.
+        sfg_bytes = dill.dumps(sfg)
         circuit = None
         if circuitId is not None:
             circuit = Circuit(
@@ -174,7 +177,9 @@ class Circuit(Document):
                 svg=svg,
                 op_point_log=op_point_log,
                 parameters=parameters,
-                sfg=dill.dumps(sfg)
+                sfg=sfg_bytes,
+                original_sfg=sfg_bytes,
+                original_parameters=parameters.copy(),
             )
         else:
             circuit = Circuit(
@@ -184,11 +189,43 @@ class Circuit(Document):
                 svg=svg,
                 op_point_log=op_point_log,
                 parameters=parameters,
-                sfg=dill.dumps(sfg)
+                sfg=sfg_bytes,
+                original_sfg=sfg_bytes,
+                original_parameters=parameters.copy(),
             )
         circuit.save()
 
         return circuit
+
+    def reset_to_original(self):
+        """Reset the circuit back to its original uploaded state.
+        Restores the original SFG and parameters from the stored copies.
+        Clears undo/redo stacks and cached transfer functions."""
+        if self.original_sfg:
+            self.sfg = self.original_sfg
+        else:
+            # Fallback for circuits created before original_sfg was stored:
+            # re-derive from the netlist.
+            circuit = circuit_parser.Circuit.from_ltspice_netlist(
+                self.netlist, self.op_point_log
+            )
+            sfg_bytes = dill.dumps(DPI(circuit).graph)
+            self.sfg = sfg_bytes
+            self.original_sfg = sfg_bytes
+
+        if self.original_parameters:
+            self.parameters = self.original_parameters.copy()
+        else:
+            circuit = circuit_parser.Circuit.from_ltspice_netlist(
+                self.netlist, self.op_point_log
+            )
+            self.parameters = circuit.parameters()
+            self.original_parameters = self.parameters.copy()
+
+        self.transfer_functions.delete()
+        self.loop_gain = None
+        self.sfg_stack = []
+        self.redo_stack = []
 
     def update_parameters(self, update_dict: Dict):
         """Update the circuit parameters.
@@ -811,6 +848,10 @@ class Circuit(Document):
         self.op_point_log = new_circuit.op_point_log
         self.parameters = new_circuit.parameters
         self.sfg = new_circuit.sfg
+        self.original_sfg = getattr(new_circuit, 'original_sfg', None) or new_circuit.sfg
+        self.original_parameters = getattr(new_circuit, 'original_parameters', None) or (
+            new_circuit.parameters.copy() if new_circuit.parameters else {}
+        )
         self.transfer_functions = new_circuit.transfer_functions
         self.loop_gain = new_circuit.loop_gain
         self.created = new_circuit.created

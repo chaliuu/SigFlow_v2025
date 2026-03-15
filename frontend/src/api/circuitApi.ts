@@ -76,6 +76,16 @@ export async function getCircuit(
   );
 }
 
+export async function resetCircuit(
+  circuitId: string,
+  fields = 'id,name,parameters,sfg,svg',
+): Promise<CircuitData> {
+  return request<CircuitData>(
+    `${BASE}/circuits/${circuitId}/reset?fields=${encodeURIComponent(fields)}`,
+    { method: 'POST' },
+  );
+}
+
 export async function patchCircuit(
   circuitId: string,
   params: Record<string, number>,

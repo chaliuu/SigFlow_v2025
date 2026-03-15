@@ -42,7 +42,7 @@ export default function SfgAppPage() {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMd = useMediaQuery(theme.breakpoints.up('md'));
-  const { circuitId, data, loadCircuit } = useCircuit();
+  const { circuitId, data, loadCircuit, resetCircuit } = useCircuit();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   /* Ref to the legacy iframe – shared between SfgEmbed and SfgToolbar */
@@ -118,11 +118,14 @@ export default function SfgAppPage() {
 
           {/* Quick-action buttons */}
           <Stack direction="row" spacing={0.5}>
-            <Tooltip title="Refresh circuit data">
-              <IconButton size="small" onClick={() => {
-                loadCircuit();
-                if (iframeRef.current?.contentWindow) {
-                  iframeRef.current.contentWindow.postMessage({ type: 'sfg-command', action: 'refresh' }, '*');
+            <Tooltip title="Reset circuit">
+              <IconButton size="small" onClick={async () => {
+                await resetCircuit();
+                if(iframeRef.current?.contentWindow) {
+                  iframeRef.current.contentWindow.postMessage(
+                    { type: 'sfg-command', action: 'refresh' },
+                    '*'
+                  );
                 }
               }}>
                 <RefreshIcon fontSize="small" />
