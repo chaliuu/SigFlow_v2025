@@ -24,7 +24,15 @@ import type { BodeData } from '../../types';
 import BodeChart from './BodeChart';
 import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
-export default function LoopGainPanel() {
+type LoopGainPanelProps = {
+  expanded?: boolean;
+  onChange?: (event: React.SyntheticEvent, expanded: boolean) => void;
+};
+
+export default function LoopGainPanel({
+  expanded = false,
+  onChange,
+}: LoopGainPanelProps) {
   const { circuitId } = useCircuit();
 
   const [lgNum, setLgNum] = useState(false);
@@ -63,7 +71,7 @@ export default function LoopGainPanel() {
   );
 
   return (
-    <Accordion disableGutters sx={accordionSx}>
+    <Accordion disableGutters sx={accordionSx} expanded={expanded} onChange={onChange}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
         <Stack direction="row" alignItems="center" spacing={1}>
           <LoopIcon color="primary" fontSize="small" />
@@ -72,11 +80,18 @@ export default function LoopGainPanel() {
           </Typography>
         </Stack>
       </AccordionSummary>
-      <AccordionDetails sx={{ pt: 0.5 }}>
+
+      <AccordionDetails
+        sx={{
+          pt: 0.5,
+          overflow: 'auto',
+        }}
+      >
         <Stack direction="row" alignItems="center" spacing={2}>
           <Button variant="contained" size="small" onClick={() => fetchLG()}>
             Compute
           </Button>
+
           <FormControlLabel
             control={
               <Switch
@@ -85,7 +100,9 @@ export default function LoopGainPanel() {
                 onChange={() => {
                   const next = !lgNum;
                   setLgNum(next);
-                  if (lgLatex) {fetchLG(next);}
+                  if (lgLatex) {
+                    fetchLG(next);
+                  }
                 }}
               />
             }
@@ -114,7 +131,6 @@ export default function LoopGainPanel() {
           </Box>
         )}
 
-        {/* LG Bode plot */}
         <BodeChart label="Bode Plot" onFetch={fetchLGBode} />
       </AccordionDetails>
     </Accordion>

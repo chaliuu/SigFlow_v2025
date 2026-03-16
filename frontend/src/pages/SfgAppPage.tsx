@@ -1,8 +1,5 @@
 /* ------------------------------------------------------------------ */
 /*  SigFlow – Main SFG Application Page                                */
-/*                                                                     */
-/*  Layout: AppBar + toggleable left sidebar (analysis accordion       */
-/*  panels) + SFG toolbar + legacy SFG iframe filling the rest.        */
 /* ------------------------------------------------------------------ */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -37,6 +34,9 @@ import TransferFunctionPanel from '../components/analysis/TransferFunctionPanel'
 import LoopGainPanel from '@/components/analysis/LoopGainPanel';
 
 const SIDEBAR_WIDTH = 380;
+const BOTTOM_PANEL_HEIGHT = 320;
+const ACCORDION_HEADER_HEIGHT = 48;
+const COLLAPSED_BOTTOM_HEIGHT = ACCORDION_HEADER_HEIGHT * 2;
 
 export default function SfgAppPage() {
   const navigate = useNavigate();
@@ -45,10 +45,11 @@ export default function SfgAppPage() {
   const { circuitId, data, loadCircuit, resetCircuit } = useCircuit();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  /* Ref to the legacy iframe – shared between SfgEmbed and SfgToolbar */
+  const [tfExpanded, setTfExpanded] = useState(false);
+  const [lgExpanded, setLgExpanded] = useState(false);
+
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  /* Redirect to landing if no circuit loaded */
   useEffect(() => {
     if (!circuitId) {
       navigate('/');
@@ -58,7 +59,6 @@ export default function SfgAppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuitId]);
 
-  /* Export callback */
   const handleExport = useCallback(async () => {
     if (!circuitId) return;
     try {
@@ -76,6 +76,9 @@ export default function SfgAppPage() {
 
   if (!circuitId) return null;
 
+  const anyPanelOpen = tfExpanded || lgExpanded;
+  const bottomHeight = anyPanelOpen ? BOTTOM_PANEL_HEIGHT : COLLAPSED_BOTTOM_HEIGHT;
+
   return (
     <Box
       sx={{
@@ -85,7 +88,6 @@ export default function SfgAppPage() {
         bgcolor: 'background.default',
       }}
     >
-      {/* ============ AppBar ============ */}
       <AppBar
         position="static"
         elevation={0}
@@ -96,7 +98,6 @@ export default function SfgAppPage() {
         }}
       >
         <Toolbar variant="dense">
-          {/* Sidebar toggle */}
           <Tooltip title={sidebarOpen ? 'Close analysis panel' : 'Open analysis panel'}>
             <IconButton edge="start" onClick={() => setSidebarOpen((o) => !o)} sx={{ mr: 1 }}>
               {sidebarOpen ? <MenuOpenIcon /> : <MenuIcon />}
@@ -116,7 +117,6 @@ export default function SfgAppPage() {
 
           <Box sx={{ flexGrow: 1 }} />
 
-          {/* Quick-action buttons */}
           <Stack direction="row" spacing={0.5}>
             <Tooltip title="Reset circuit">
               <IconButton size="small" onClick={async () => {
@@ -167,9 +167,7 @@ export default function SfgAppPage() {
         </Toolbar>
       </AppBar>
 
-      {/* ============ Body ============ */}
-      <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Sidebar – persistent on desktop, overlay drawer on mobile */}
+      <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
         {isMd ? (
           <Box
             sx={{
@@ -192,18 +190,64 @@ export default function SfgAppPage() {
           </Drawer>
         )}
 
-        {/* SFG viewer – toolbar + legacy iframe fills remaining space */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
           <SfgToolbar iframeRef={iframeRef} />
-          {/* SFG iframe area */}
+
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             <SfgEmbed circuitId={circuitId} iframeRef={iframeRef} />
           </Box>
-          {/* Panels under SFG */}
-          <Box sx={{ borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default', p: 1, overflow: 'auto', }}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 1, alignItems: 'start', }}>
-              <TransferFunctionPanel />
-              <LoopGainPanel />
+
+          <Box
+            sx={{
+              height: bottomHeight,
+              maxHeight: BOTTOM_PANEL_HEIGHT,
+              minHeight: COLLAPSED_BOTTOM_HEIGHT,
+              overflow: 'hidden',
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              bgcolor: 'background.paper',
+              transition: 'height 0.2s ease',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <Box
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                overflow: 'auto',
+                '& .MuiAccordion-root': {
+                  m: 0,
+                  borderRadius: 0,
+                },
+                '& .MuiAccordionSummary-root': {
+                  minHeight: `${ACCORDION_HEADER_HEIGHT}px`,
+                },
+                '& .MuiAccordionSummary-content': {
+                  my: 0.75,
+                },
+                '& .MuiAccordionDetails-root': {
+                  overflow: 'auto',
+                },
+              }}
+            >
+              <TransferFunctionPanel
+                expanded={tfExpanded}
+                onChange={(_, expanded) => setTfExpanded(expanded)}
+              />
+              <LoopGainPanel
+                expanded={lgExpanded}
+                onChange={(_, expanded) => setLgExpanded(expanded)}
+              />
             </Box>
           </Box>
         </Box>

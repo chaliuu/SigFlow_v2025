@@ -25,7 +25,15 @@ import type { BodeData } from '../../types';
 import BodeChart from './BodeChart';
 import { accordionSx, summarySx } from '../sidebar/sidebarStyles';
 
-export default function TransferFunctionPanel() {
+type TransferFunctionPanelProps = {
+  expanded?: boolean;
+  onChange?: (event: React.SyntheticEvent, expanded: boolean) => void;
+};
+
+export default function TransferFunctionPanel({
+  expanded = false,
+  onChange,
+}: TransferFunctionPanelProps) {
   const { circuitId } = useCircuit();
 
   const [tfIn, setTfIn] = useState('');
@@ -68,7 +76,7 @@ export default function TransferFunctionPanel() {
   );
 
   return (
-    <Accordion disableGutters sx={accordionSx}>
+    <Accordion disableGutters sx={accordionSx} expanded={expanded} onChange={onChange}>
       <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={summarySx}>
         <Stack direction="row" alignItems="center" spacing={1}>
           <FunctionsIcon color="primary" fontSize="small" />
@@ -77,8 +85,13 @@ export default function TransferFunctionPanel() {
           </Typography>
         </Stack>
       </AccordionSummary>
-      <AccordionDetails sx={{ pt: 0.5 }}>
-        {/* Symbolic TF */}
+
+      <AccordionDetails
+        sx={{
+          pt: 0.5,
+          overflow: 'auto',
+        }}
+      >
         <Stack spacing={1.5}>
           <Stack direction="row" spacing={1}>
             <TextField
@@ -96,10 +109,12 @@ export default function TransferFunctionPanel() {
               fullWidth
             />
           </Stack>
+
           <Stack direction="row" alignItems="center" spacing={2}>
             <Button variant="contained" size="small" onClick={() => fetchTF()}>
               Compute
             </Button>
+
             <FormControlLabel
               control={
                 <Switch
@@ -108,7 +123,9 @@ export default function TransferFunctionPanel() {
                   onChange={() => {
                     const next = !tfNum;
                     setTfNum(next);
-                    if (tfLatex) {fetchTF(next);}
+                    if (tfLatex) {
+                      fetchTF(next);
+                    }
                   }}
                 />
               }
@@ -138,7 +155,6 @@ export default function TransferFunctionPanel() {
           </Box>
         )}
 
-        {/* TF Bode plot */}
         <BodeChart label="Bode Plot" onFetch={fetchTFBode} />
       </AccordionDetails>
     </Accordion>
