@@ -59,6 +59,19 @@ export default function SfgAppPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [circuitId]);
 
+useEffect(() => {
+  const timer = setTimeout(() => {
+    const win = iframeRef.current?.contentWindow;
+    if (win) {
+      win.postMessage({ type: 'SFG_LAYOUT_CHANGED' }, '*');
+    }
+  }, 300);
+
+  return () => clearTimeout(timer);
+}, [sidebarOpen, tfExpanded, lgExpanded, isMd]);
+
+
+
   const handleExport = useCallback(async () => {
     if (!circuitId) return;
     try {

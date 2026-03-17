@@ -567,7 +567,7 @@ function make_sfg(elements) {
         cy.$('#' + node.id()).css({ 'background-color': '#f8075a' });
         hlt_tgt = node;
       }
-      if (hlt_src != null & hlt_tgt != null) {
+      if (hlt_src != null && hlt_tgt != null) {
         console.log("Time to highlight:)");
         HighlightPath();
       } else {
@@ -580,18 +580,6 @@ function make_sfg(elements) {
   initializeEdgeHover();
 
   renderCurrentLabelMode();
-
-  try {
-      if (window.cy) {
-        autoRelocateIVNodesPrefix({
-          animate: false,
-          iscOffsetPx: 50
-        });
-        scheduleEdgeCurveUpdate(window.cy);
-      }
-    } catch (e) {
-      console.warn('Auto placement failed while syncing overlay:', e);
-    }
 
   const time2 = new Date();
   let time_elapse = (time2 - time1)/1000;
@@ -865,10 +853,18 @@ function applyEdgeCurves(cy) {
 //ALIGNMENT NOT FULLY CORRECT
 
 function alignLayers(svgLayer, sfgLayer) {
+    if (!svgLayer || !sfgLayer) {
+        return;
+    }
+
+    // Reset transform before measuring so transforms do not compound
+    svgLayer.style.transform = 'none';
+    svgLayer.style.transformOrigin = 'top left';
+
     const svgBounds = svgLayer.getBoundingClientRect();
     const sfgBounds = sfgLayer.getBoundingClientRect();
 
-    if (!svgBounds.width || !svgBounds.height) {
+    if (!svgBounds.width || !svgBounds.height || !sfgBounds.width || !sfgBounds.height) {
         return;
     }
 
@@ -877,7 +873,7 @@ function alignLayers(svgLayer, sfgLayer) {
     const offsetX = sfgBounds.left - svgBounds.left;
     const offsetY = sfgBounds.top - svgBounds.top;
 
-    svgLayer.style.transformOrigin = "top left";
+    svgLayer.style.transformOrigin = 'top left';
     svgLayer.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scaleX}, ${scaleY})`;
 
     svgLayer.style.opacity = 0.5;
@@ -885,7 +881,6 @@ function alignLayers(svgLayer, sfgLayer) {
 
     console.log("SVG aligned with SFG:", { scaleX, scaleY, offsetX, offsetY });
 }
-
 
 function renderOverlay(data) {
   const svgLayer = document.getElementById('svg-layer');
@@ -909,19 +904,8 @@ function renderOverlay(data) {
   }
 
   requestAnimationFrame(() => {
-    alignLayers(svgLayer, sfgLayer);
-
-    try {
-      if (window.cy) {
-        autoRelocateIVNodesPrefix({
-          animate: false,
-          iscOffsetPx: 50,
-        });
-        scheduleEdgeCurveUpdate(window.cy);
-      }
-    } catch (e) {
-      console.warn('Auto placement failed while syncing overlay:', e);
-    }
+    resyncOverlayToLayout();
+    attachOverlayResizeSync();
   });
 }
 
@@ -1878,11 +1862,18 @@ function render_frontend(data) {
 
 // Update SFG and parameter panel
 function update_frontend(data) {
-    let curr_elements = edge_helper(data, symbolic_flag)
-    // load SFG panel
-    make_sfg(curr_elements)
-    // load parameter panel
-    make_parameter_panel(data.parameters)
+    let curr_elements = edge_helper(data, symbolic_flag);
+
+    make_sfg(curr_elements);
+    make_parameter_panel(data.parameters);
+
+    if (data.svg != null) {
+        renderOverlay(data);
+    } else {
+        requestAnimationFrame(() => {
+            resyncOverlayToLayout();
+        });
+    }
 }
 
 
@@ -4577,3 +4568,68 @@ function autoRelocateIVNodesPrefix({
   // 4) Move the nodes
   relocateSfgNodesToSvg({ rows, animate, duration });
 }
+
+let overlayResizeObserver = null;
+let overlayResizeRaf = null;
+
+function resyncOverlayToLayout() {
+    const svgLayer = document.getElementById('svg-layer');
+    const sfgLayer = document.getElementById('cy');
+
+    if (!svgLayer || !sfgLayer) {
+        return;
+    }
+
+    if (!window.cy || window.cy.destroyed()) {
+        return;
+    }
+
+    // Let Cytoscape know its container size changed
+    window.cy.resize();
+
+    // Re-align SVG overlay to the new SFG size
+    alignLayers(svgLayer, sfgLayer);
+
+    // Re-relocate nodes to the SVG anchors using the new client-space geometry
+    try {
+        autoRelocateIVNodesPrefix({
+            animate: false,
+            iscOffsetPx: 50
+        });
+        scheduleEdgeCurveUpdate(window.cy);
+    } catch (e) {
+        console.warn('Overlay resync failed:', e);
+    }
+}
+
+function attachOverlayResizeSync() {
+    const sfgLayer = document.getElementById('cy');
+    const overlayContainer = document.getElementById('overlay-container');
+
+    if (!sfgLayer || !overlayContainer) {
+        return;
+    }
+
+    if (overlayResizeObserver) {
+        overlayResizeObserver.disconnect();
+    }
+
+    overlayResizeObserver = new ResizeObserver(() => {
+        if (overlayResizeRaf) {
+            cancelAnimationFrame(overlayResizeRaf);
+        }
+
+        overlayResizeRaf = requestAnimationFrame(() => {
+            resyncOverlayToLayout();
+        });
+    });
+
+    overlayResizeObserver.observe(sfgLayer);
+    overlayResizeObserver.observe(overlayContainer);
+}
+
+window.addEventListener('resize', () => {
+    requestAnimationFrame(() => {
+        resyncOverlayToLayout();
+    });
+});
