@@ -16,10 +16,10 @@ import json
 import sympy
 import re
 from util.latex_parser import correlate_params_from_latex, rewrite_symbolic_to_canonical
-
+from mongoengine import ValidationError
+import io
 
 import db
-
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
 # app.config['DEBUG'] = False
@@ -756,18 +756,27 @@ def get_sfg(circuit_id):
 # TODO import needs implementation
 @app.route("/circuits/<circuit_id>/import", methods=["POST"])
 def import_dill_sfg(circuit_id):
-    circuit = db.Circuit.objects(id=circuit_id).first()
+    
+    # First check if circuit is in database already
+    try: 
+        circuit = db.Circuit.objects(id=circuit_id).first()
+    except (ValidationError, TypeError, ValueError):
+        circuit = None
 
     try:
         uploaded_file = request.files.get("file")
         if uploaded_file is None:
-            abort(400, description="Missing uploaded file")
+            abort(400, description="No file was uploaded")
 
         payload = uploaded_file.read()
         if not payload:
             abort(400, description="Uploaded file is empty")
 
-        loaded_sfg = dill.loads(payload)
+        try:
+            loaded_sfg = dill.loads(payload)
+        except Exception:
+            loaded_sfg = dill.loads(io.BytesIO(payload))
+            
 
         if not circuit:
             # Only persist the provided id when it is a valid ObjectId, otherwise
