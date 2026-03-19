@@ -1,0 +1,6 @@
+{
+  "name": "sigflow-deployment",
+  "scripts": {
+    "build": "cd frontend && npm install --include=dev && npm run build"
+  }
+}
