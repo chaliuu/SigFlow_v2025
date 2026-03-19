@@ -9,17 +9,13 @@ from flask import (
 )
 from flask_cors import CORS
 from distutils.util import strtobool
-import os
 import tempfile
 import dill
-import json
-import sympy
-import re
 from util.latex_parser import correlate_params_from_latex, rewrite_symbolic_to_canonical
-
+from mongoengine import ValidationError
+import io
 
 import db
-
 
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
 # app.config['DEBUG'] = False
@@ -70,19 +66,6 @@ def create_circuit():
 
     schematic = request.json.get("schematic")
     op_point_log = request.json.get("op_point_log")
-
-    # Debug statements for visibility
-    if schematic:
-        print(f"DEBUG: Schematic length: {len(schematic)}")
-        print(f"DEBUG: Schematic first 100 chars: {repr(schematic[:100])}")
-    else:
-        print("DEBUG: schematic is None or empty")
-    
-    if op_point_log:
-        print(f"DEBUG: Operating Point Analysis Log File length: {len(op_point_log)}")
-        print(f"DEBUG: Operating Point Analysis Log File first 100 chars: {repr(op_point_log[:100])}")
-    else:
-        print("DEBUG: op_point_log is None or empty")
 
     try:
         circuit = db.Circuit.create(name, netlist, schematic, op_point_log)
@@ -319,81 +302,6 @@ def get_edge_info(circuit_id):
 
     except Exception as e:
         return jsonify(error=str(e)), 400
-
-
-# @app.route('/circuits/<circuit_id>/get_edge_info', methods=['GET'])
-def qget_edge_info(circuit_id):
-    circuit = db.Circuit.objects(id=circuit_id).first()
-    if not circuit:
-        abort(404, description="Circuit not found")
-
-    # try:
-    #     source = request.args.get('source')
-    #     target = request.args.get('target')
-    #     edge = circuit.get_edge(source, target)
-
-    #     print("edge: " + str(edge))
-    #     print("edge.to_dict(): " + str(edge.to_dict()))
-    #     return edge.to_dict()
-
-    # except Exception as e:
-    #     abort(400, description=str(e))
-
-    source = request.args.get("source")
-    target = request.args.get("target")
-
-    if not source or not target:
-        abort(400, description="Source and target nodes must be provided")
-
-    # try:
-    #     # edge = next((edge for edge in circuit.sfg['elements']['edges'] if edge['data']['source'] == source and edge['data']['target'] == target), None)
-
-    #     # if not edge:
-    #     #     abort(404, description='Edge not found')
-
-    #     # weight = edge['data']['weight']
-    #     # return jsonify(weight)
-
-    #     fields = request.args.get(
-    #         'fields',
-    #         type=lambda s: s and s.split(',') or None
-    #     )
-    #     # print fields
-    #     print("fields: " + str(fields))
-    #     print(circuit.to_dict(fields))
-    #     # return circuit.to_dict(fields)
-
-    try:
-        edge = next(
-            (
-                edge
-                for edge in circuit.sfg["elements"]["edges"]
-                if edge["data"]["source"] == source and edge["data"]["target"] == target
-            ),
-            None,
-        )
-
-        if not edge:
-            abort(404, description="Edge not found")
-
-        weight = edge["data"]["weight"]
-        response = jsonify(weight)
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
-        return response
-
-    except Exception as e:
-        abort(400, description=str(e))
-
-    # circuit.save()
-    # response = jsonify({circuit.to_dict(fields)})
-    # response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-    # response.headers['Pragma'] = 'no-cache'
-    # response.headers['Expires'] = '0'
-    # print ("response: " + str(response))
-    # return response
-
 
 @app.route("/circuits/<circuit_id>/transfer_function", methods=["GET"])
 def get_transfer_function(circuit_id):
@@ -756,18 +664,27 @@ def get_sfg(circuit_id):
 # TODO import needs implementation
 @app.route("/circuits/<circuit_id>/import", methods=["POST"])
 def import_dill_sfg(circuit_id):
-    circuit = db.Circuit.objects(id=circuit_id).first()
+    
+    # First check if circuit is in database already
+    try: 
+        circuit = db.Circuit.objects(id=circuit_id).first()
+    except (ValidationError, TypeError, ValueError):
+        circuit = None
 
     try:
         uploaded_file = request.files.get("file")
         if uploaded_file is None:
-            abort(400, description="Missing uploaded file")
+            abort(400, description="No file was uploaded")
 
         payload = uploaded_file.read()
         if not payload:
             abort(400, description="Uploaded file is empty")
 
-        loaded_sfg = dill.loads(payload)
+        try:
+            loaded_sfg = dill.loads(payload)
+        except Exception:
+            loaded_sfg = dill.loads(io.BytesIO(payload))
+            
 
         if not circuit:
             # Only persist the provided id when it is a valid ObjectId, otherwise
