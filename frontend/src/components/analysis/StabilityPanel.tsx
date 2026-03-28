@@ -2,6 +2,7 @@
 /*  SigFlow – Stability Analysis Accordion Section                     */
 /* ------------------------------------------------------------------ */
 import React, { useState, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import {
   Box,
   Typography,
@@ -43,7 +44,12 @@ ChartJS.register(
 );
 
 export default function StabilityPanel() {
-  const { circuitId } = useCircuit();
+  const { circuitId, data } = useCircuit();
+
+  const waitForNextFrame = () =>
+    new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
 
   const [stabIn, setStabIn] = useState('');
   const [stabOut, setStabOut] = useState('');
@@ -52,6 +58,7 @@ export default function StabilityPanel() {
   const [stabMax, setStabMax] = useState('');
   const [stabStep, setStabStep] = useState('');
   const [stabErr, setStabErr] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [stabPm, setStabPm] = useState<{
     device_value: number[];
     phase_margin: number[];
@@ -64,37 +71,84 @@ export default function StabilityPanel() {
   const handleStability = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!circuitId) return;
-      setStabErr(null);
-      if (!stabIn || !stabOut || !stabDev || !stabMin || !stabMax || !stabStep) {
-        setStabErr('Please fill in all fields.');
-        return;
-      }
-      const p = {
-        input_node: stabIn,
-        output_node: stabOut,
-        selected_device: stabDev,
-        min_val: parseFloat(stabMin),
-        max_val: parseFloat(stabMax),
-        step_size: parseFloat(stabStep),
-      };
+      // Show processing immediately on click, before validation/API work.
+      flushSync(() => {
+        setSubmitting(true);
+      });
+      await waitForNextFrame();
+
       try {
-        const exists = await api.checkDeviceExists(circuitId, stabDev);
-        if (!exists) {
-          setStabErr(`Device "${stabDev}" not found.`);
+        if (!circuitId) return;
+        setStabErr(null);
+        if (!stabIn || !stabOut || !stabDev || !stabMin || !stabMax || !stabStep) {
+          setStabErr('Please fill in all fields.');
           return;
         }
-        const [pm, bw] = await Promise.all([
-          api.getPhaseMarginPlot(circuitId, p),
-          api.getBandwidthPlot(circuitId, p),
-        ]);
-        setStabPm(pm);
-        setStabBw(bw);
-      } catch (err) {
-        setStabErr(err instanceof Error ? err.message : 'Error');
+        const minVal = Number(stabMin);
+        const maxVal = Number(stabMax);
+        const stepSize = Number(stabStep);
+
+        if (!Number.isFinite(minVal) || !Number.isFinite(maxVal) || !Number.isFinite(stepSize)) {
+          setStabErr('Min, Max, and Step must be valid numbers.');
+          return;
+        }
+
+        if (minVal >= maxVal) {
+          setStabErr('Minimum value must be less than maximum value.');
+          return;
+        }
+
+        if (stepSize <= 0) {
+          setStabErr('Step size must be greater than zero.');
+          return;
+        }
+
+        if (stepSize >= maxVal - minVal) {
+          setStabErr('Step size must be less than (max - min).');
+          return;
+        }
+
+        const nodes = data?.sfg?.elements?.nodes ?? [];
+        const nodeIds = new Set(nodes.map((n) => n.data.id));
+        if (!nodeIds.has(stabIn) || !nodeIds.has(stabOut)) {
+          const invalidNodes = [stabIn, stabOut].filter((n) => !nodeIds.has(n));
+          setStabErr(
+            invalidNodes.length === 1
+              ? `The selected node "${invalidNodes[0]}" is not valid.`
+              : `The selected nodes "${invalidNodes.join('" and "')}" are not valid.`,
+          );
+          return;
+        }
+
+        const p = {
+          input_node: stabIn,
+          output_node: stabOut,
+          selected_device: stabDev,
+          min_val: minVal,
+          max_val: maxVal,
+          step_size: stepSize,
+        };
+
+      try {
+          const exists = await api.checkDeviceExists(circuitId, stabDev);
+          if (!exists) {
+            setStabErr(`Device "${stabDev}" not found.`);
+            return;
+          }
+          const [pm, bw] = await Promise.all([
+            api.getPhaseMarginPlot(circuitId, p),
+            api.getBandwidthPlot(circuitId, p),
+          ]);
+          setStabPm(pm);
+          setStabBw(bw);
+        } catch (err) {
+          setStabErr(err instanceof Error ? err.message : 'Error');
+        }
+      } finally {
+        setSubmitting(false);
       }
     },
-    [circuitId, stabIn, stabOut, stabDev, stabMin, stabMax, stabStep],
+    [circuitId, data?.sfg?.elements?.nodes, stabIn, stabOut, stabDev, stabMin, stabMax, stabStep],
   );
 
   const pmChartData = useMemo(() => {
@@ -211,8 +265,8 @@ export default function StabilityPanel() {
                 fullWidth
               />
             </Stack>
-            <Button type="submit" variant="contained" size="small">
-              Analyse
+            <Button type="submit" variant="contained" size="small" disabled={submitting}>
+              {submitting ? 'Processing…' : 'Analyse'}
             </Button>
           </Stack>
         </form>

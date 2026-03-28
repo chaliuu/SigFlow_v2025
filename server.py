@@ -723,16 +723,28 @@ def plot_phase_margin(circuit_id):
     if not circuit:
         abort(404, description='Circuit not found')
 
-    #if  min_cap <= 0 or max_cap <= 0 or step_size <= 0 or not selected_cap:
-    #    return jsonify({"error": "Invalid input parameters"}), 400
-    
-    # Step 1: Parse query parameters
+    # Step 1: Parse and validate query parameters
     input_node = request.args.get('input_node', type=str)
     output_node = request.args.get('output_node', type=str)
     selected_device = request.args.get('selected_device', type=str)
-    min_val = float(request.args.get('min_val', type=float))
-    max_val = float(request.args.get('max_val', type=float))
-    step_size = float(request.args.get('step_size', type=float))
+    min_val = request.args.get('min_val', type=float)
+    max_val = request.args.get('max_val', type=float)
+    step_size = request.args.get('step_size', type=float)
+
+    if not input_node or not output_node or not selected_device:
+        abort(400, description='Missing required parameters: input_node, output_node, selected_device')
+
+    if min_val is None or max_val is None or step_size is None:
+        abort(400, description='min_val, max_val, and step_size must be valid numbers')
+
+    if min_val >= max_val:
+        abort(400, description='min_val must be less than max_val')
+
+    if step_size <= 0:
+        abort(400, description='step_size must be greater than 0')
+
+    if step_size >= (max_val - min_val):
+        abort(400, description='step_size must be less than (max_val - min_val)')
 
     try:
         device_value, phase_margin = circuit.sweep_params_for_phase_margin(
@@ -764,16 +776,28 @@ def plot_bandwidth(circuit_id):
     if not circuit:
         abort(404, description='Circuit not found')
 
-    #if  min_cap <= 0 or max_cap <= 0 or step_size <= 0 or not selected_cap:
-    #    return jsonify({"error": "Invalid input parameters"}), 400
-    
-    # Step 1: Parse query parameters
+    # Step 1: Parse and validate query parameters
     input_node = request.args.get('input_node', type=str)
     output_node = request.args.get('output_node', type=str)
     selected_device = request.args.get('selected_device', type=str)
-    min_val = float(request.args.get('min_val', type=float))
-    max_val = float(request.args.get('max_val', type=float))
-    step_size = float(request.args.get('step_size', type=float))
+    min_val = request.args.get('min_val', type=float)
+    max_val = request.args.get('max_val', type=float)
+    step_size = request.args.get('step_size', type=float)
+
+    if not input_node or not output_node or not selected_device:
+        abort(400, description='Missing required parameters: input_node, output_node, selected_device')
+
+    if min_val is None or max_val is None or step_size is None:
+        abort(400, description='min_val, max_val, and step_size must be valid numbers')
+
+    if min_val >= max_val:
+        abort(400, description='min_val must be less than max_val')
+
+    if step_size <= 0:
+        abort(400, description='step_size must be greater than 0')
+
+    if step_size >= (max_val - min_val):
+        abort(400, description='step_size must be less than (max_val - min_val)')
 
     try:
         parameter_value, bandwidth = circuit.sweep_params_for_bandwidth(
