@@ -43,7 +43,7 @@ def asc_to_svg(schematic: str) -> str:
     with temporary_filename() as asc_file, temporary_filename() as svg_file:
         # Create temporary files as the ltspice2svg library expects file names.
 
-        with open(asc_file, 'w') as f:
+        with open(asc_file, 'w', newline='') as f:
             f.write(schematic)
 
         script_dir, _ = os.path.split(__file__)

@@ -556,11 +556,10 @@ class MOSFET(Component):
     @classmethod
     def from_netlist_entry(cls, entry: str) -> 'MOSFET':
         print("in from_netlist_entry:",entry)
-        name, source, gate, drain, substrate, model = \
-            entry.split(' ', 5)
-        
+        name, drain, gate, source, substrate, model = entry.split(' ', 5)
+
         print(name, ", ", source, ", ", gate, ", ", drain, ", ", substrate, " , ", model)
-        return MOSFET(name, drain, gate, source, substrate,
+        return MOSFET(name, source, gate, drain, substrate,
                                  model)
 
     def to_netlist_entry(self) -> str:
@@ -592,8 +591,8 @@ class MOSFET(Component):
 
         g = VoltageDependentCurrentSource(
             f'G_{self.name}',
-            self.source,
             self.drain,
+            self.source,
             self.gate,
             self.source,
             g_m
