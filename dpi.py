@@ -396,7 +396,9 @@ def DPI_algorithm( circuit : cir.Circuit ):
         for ne in circuit.multigraph.neighbors(n):
             neighbors[n].append(ne)
             for k in circuit.multigraph.get_edge_data(n , ne):
-                if circuit.multigraph.edges[n,ne,k]['component'].name.find("PI") != -1:
+                # change skipping condition to only R_pi with a resistance greater than 1e20 to skip dummy MOSFET r_pis
+                _comp = circuit.multigraph.edges[n,ne,k]['component']
+                if _comp.name.find("PI") != -1 and isinstance(_comp, cir.Resistor) and getattr(_comp, "resistance", 0) >= 1e20:
                     continue
                 if (isinstance(circuit.multigraph.edges[n,ne,k]['component'], cir.CurrentSource)):
                     cur_target = "Isc" + n[1:].lower() if n.startswith("V") else "Isc" + n.lower()
