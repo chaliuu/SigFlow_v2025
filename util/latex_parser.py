@@ -7,17 +7,59 @@ import re
 )'''
 from sympy.parsing.latex import parse_latex
 from sympy import latex
+from sympy.printing.conventions import split_super_sub
+from sympy.printing.latex import LatexPrinter, translate
+
+# Names that are never circuit parameters (Laplace variable, constants, ...)
+NON_PARAM_NAMES = {"s", "t", "j", "omega", "pi"}
+
+
+class _LiteralPiLatexPrinter(LatexPrinter):
+    """LatexPrinter that never turns a 'pi' name part into the greek letter.
+
+    sympy.latex() renders R_PI_Q1 as R_{\\pi Q1}, R_pi as R_{\\pi} and R_Pi as
+    R_{\\Pi}, so hybrid-pi parameters show up as π in the UI and branch edit
+    can no longer map them back to parameter names. Name parts spelled pi
+    (any case) are printed as lowercase 'pi'; everything else is translated
+    as usual.
+    """
+
+    def _deal_with_super_sub(self, string, style='plain'):
+        if '{' in string:
+            return super()._deal_with_super_sub(string, style)
+
+        def tr(part):
+            return 'pi' if part.lower() == 'pi' else translate(part)
+
+        name, supers, subs = split_super_sub(string)
+        name = tr(name)
+        if style == 'bold':
+            name = "\\mathbf{{{}}}".format(name)
+        if supers:
+            name += "^{%s}" % " ".join(tr(sup) for sup in supers)
+        if subs:
+            name += "_{%s}" % " ".join(tr(sub) for sub in subs)
+        return name
 
 
 def expr_to_latex(expr) -> str:
-    """LaTeX for SFG / transfer-function UI.
+    """LaTeX for SFG / transfer-function UI, with pi always spelled out.
 
-    sympy.latex() treats the PI in R_PI_Q1 as the greek letter pi, which
-    produces R_{\\pi Q1}. Branch edit then rejects that string as invalid
-    LaTeX. Keep PI as the letters PI so it matches R_{O Q1} style names.
+    R_PI_Q1 -> R_{pi Q1}, R_pi -> R_{pi}, matching R_{O Q1} style names.
+    The constant sympy.pi is printed as 'pi' too.
     """
-    s = sympy.latex(expr)
-    return s.replace(r'_{\pi ', r'_{PI ')
+    expr = expr.xreplace({sympy.pi: sympy.Symbol('pi')})
+    return _LiteralPiLatexPrinter().doprint(expr)
+
+
+def _resolve_param(name: str, allowed_params: set[str]):
+    """Exact match, else a unique case-insensitive match (LTspice names are
+    case-insensitive, and pi subscripts are normalized to PI, so R_{pi} must
+    still resolve to a parameter named R_pi)."""
+    if name in allowed_params:
+        return name
+    matches = [p for p in allowed_params if p.lower() == name.lower()]
+    return matches[0] if len(matches) == 1 else None
 
 def latex_symbol_tokens(latex_str: str) -> list[str]:
     """
@@ -122,11 +164,11 @@ def correlate_params_from_latex(latex_str: str, allowed_params: set[str]):
     normalized = [normalize_latex_token(t) for t in tokens]
 
     # Ignore Laplace variable and common math words if you want
-    ignore = {"s", "t", "j", "omega"}
-    used = {n for n in normalized if n not in ignore}
+    used = {n for n in normalized if n not in NON_PARAM_NAMES}
+    resolved = {n: _resolve_param(n, allowed_params) for n in used}
 
-    found = sorted(p for p in used if p in allowed_params)
-    unknown = sorted(p for p in used if p not in allowed_params)
+    found = sorted({p for p in resolved.values() if p is not None})
+    unknown = sorted(n for n, p in resolved.items() if p is None)
 
     return found, unknown
 
@@ -210,7 +252,7 @@ def split_concatenated_idents(expr: str, allowed_params: set[str]) -> str:
     Turn 'C2R2RD2s' into 'C2*R2*RD2*s' using allowed_params + {'s'}.
     Only affects long alphabetic/underscore identifiers; leaves numbers/operators alone.
     """
-    vocab = set(allowed_params) | {"s"}  # include Laplace variable
+    vocab = set(allowed_params) | {"s", "pi"}  # include Laplace variable and pi
     # prefer longer names first
     vocab_sorted = sorted(vocab, key=len, reverse=True)
 
@@ -258,10 +300,11 @@ def rewrite_symbolic_to_canonical(latex_str: str, allowed_params: set[str]) -> s
     mapping = {}
     for t in toks:
         norm = normalize_latex_token(t)
-        if norm in {"s", "t", "j", "omega"}:
+        if norm in NON_PARAM_NAMES:
             continue
-        if norm in allowed_params:
-            mapping[t] = norm
+        param = _resolve_param(norm, allowed_params)
+        if param is not None:
+            mapping[t] = param
 
     for t in sorted(mapping.keys(), key=len, reverse=True):
         s = s.replace(t, mapping[t])
