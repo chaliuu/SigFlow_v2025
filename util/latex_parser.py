@@ -7,6 +7,59 @@ import re
 )'''
 from sympy.parsing.latex import parse_latex
 from sympy import latex
+from sympy.printing.conventions import split_super_sub
+from sympy.printing.latex import LatexPrinter, translate
+
+# Names that are never circuit parameters (Laplace variable, constants, ...)
+NON_PARAM_NAMES = {"s", "t", "j", "omega", "pi"}
+
+
+class _LiteralPiLatexPrinter(LatexPrinter):
+    """LatexPrinter that never turns a 'pi' name part into the greek letter.
+
+    sympy.latex() renders R_PI_Q1 as R_{\\pi Q1}, R_pi as R_{\\pi} and R_Pi as
+    R_{\\Pi}, so hybrid-pi parameters show up as π in the UI and branch edit
+    can no longer map them back to parameter names. Name parts spelled pi
+    (any case) are printed as lowercase 'pi'; everything else is translated
+    as usual.
+    """
+
+    def _deal_with_super_sub(self, string, style='plain'):
+        if '{' in string:
+            return super()._deal_with_super_sub(string, style)
+
+        def tr(part):
+            return 'pi' if part.lower() == 'pi' else translate(part)
+
+        name, supers, subs = split_super_sub(string)
+        name = tr(name)
+        if style == 'bold':
+            name = "\\mathbf{{{}}}".format(name)
+        if supers:
+            name += "^{%s}" % " ".join(tr(sup) for sup in supers)
+        if subs:
+            name += "_{%s}" % " ".join(tr(sub) for sub in subs)
+        return name
+
+
+def expr_to_latex(expr) -> str:
+    """LaTeX for SFG / transfer-function UI, with pi always spelled out.
+
+    R_PI_Q1 -> R_{pi Q1}, R_pi -> R_{pi}, matching R_{O Q1} style names.
+    The constant sympy.pi is printed as 'pi' too.
+    """
+    expr = expr.xreplace({sympy.pi: sympy.Symbol('pi')})
+    return _LiteralPiLatexPrinter().doprint(expr)
+
+
+def _resolve_param(name: str, allowed_params: set[str]):
+    """Exact match, else a unique case-insensitive match (LTspice names are
+    case-insensitive, and pi subscripts are normalized to PI, so R_{pi} must
+    still resolve to a parameter named R_pi)."""
+    if name in allowed_params:
+        return name
+    matches = [p for p in allowed_params if p.lower() == name.lower()]
+    return matches[0] if len(matches) == 1 else None
 
 def latex_symbol_tokens(latex_str: str) -> list[str]:
     """
@@ -62,10 +115,16 @@ def normalize_latex_token(tok: str) -> str:
     base = base.strip()
     sub = sub.strip()
 
-    # remove spaces and LaTeX backslashes inside subscript
-    sub = re.sub(r"\s+", "", sub)
+    # LaTeX commands / greek pi from sympy.latex(R_PI_*)
     sub = sub.replace("\\", "")
-    sub = sub.replace("π", "PI").replace("pi", "PI")
+    sub = sub.replace("π", "PI")
+    sub = re.sub(r'(?i)(?<![A-Za-z])pi(?![A-Za-z])', 'PI', sub)
+
+    # Keep subscript segments: "O Q1" / "PI Q1" -> O_Q1 / PI_Q1
+    # so R_{O Q1} and R_{PI Q1} match parameter names R_O_Q1 / R_PI_Q1.
+    if re.search(r"\s", sub):
+        sub = re.sub(r"\s+", "_", sub.strip())
+        return f"{base}_{sub}"
 
     # Common pattern: single numeric subscript -> concat (C_{2} -> C2, RD_{2} -> RD2, R_{2} -> R2)
     if sub.isdigit():
@@ -92,6 +151,11 @@ def normalize_latex_token(tok: str) -> str:
         if m:
             return f"{base}_PI_M{m.group(1)}"
 
+    # R_{OQ1} / R_{PIQ1} (no space) -> R_O_Q1 / R_PI_Q1
+    glued = re.fullmatch(r"([A-Z]+)([QM]\d+)", sub)
+    if glued:
+        return f"{base}_{glued.group(1)}_{glued.group(2)}"
+
     # Fallback: join with underscore (keeps structure)
     return f"{base}_{sub}"
 
@@ -100,11 +164,11 @@ def correlate_params_from_latex(latex_str: str, allowed_params: set[str]):
     normalized = [normalize_latex_token(t) for t in tokens]
 
     # Ignore Laplace variable and common math words if you want
-    ignore = {"s", "t", "j", "omega"}
-    used = {n for n in normalized if n not in ignore}
+    used = {n for n in normalized if n not in NON_PARAM_NAMES}
+    resolved = {n: _resolve_param(n, allowed_params) for n in used}
 
-    found = sorted(p for p in used if p in allowed_params)
-    unknown = sorted(p for p in used if p not in allowed_params)
+    found = sorted({p for p in resolved.values() if p is not None})
+    unknown = sorted(n for n, p in resolved.items() if p is None)
 
     return found, unknown
 
@@ -188,7 +252,7 @@ def split_concatenated_idents(expr: str, allowed_params: set[str]) -> str:
     Turn 'C2R2RD2s' into 'C2*R2*RD2*s' using allowed_params + {'s'}.
     Only affects long alphabetic/underscore identifiers; leaves numbers/operators alone.
     """
-    vocab = set(allowed_params) | {"s"}  # include Laplace variable
+    vocab = set(allowed_params) | {"s", "pi"}  # include Laplace variable and pi
     # prefer longer names first
     vocab_sorted = sorted(vocab, key=len, reverse=True)
 
@@ -236,10 +300,11 @@ def rewrite_symbolic_to_canonical(latex_str: str, allowed_params: set[str]) -> s
     mapping = {}
     for t in toks:
         norm = normalize_latex_token(t)
-        if norm in {"s", "t", "j", "omega"}:
+        if norm in NON_PARAM_NAMES:
             continue
-        if norm in allowed_params:
-            mapping[t] = norm
+        param = _resolve_param(norm, allowed_params)
+        if param is not None:
+            mapping[t] = param
 
     for t in sorted(mapping.keys(), key=len, reverse=True):
         s = s.replace(t, mapping[t])

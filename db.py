@@ -18,6 +18,7 @@ from dpi import remove_dead_branches
 from dpi import simplify_whole_graph
 import ltspice2svg
 import networkx as nx
+from util.latex_parser import expr_to_latex
 
 
 if 'DB_URI' in os.environ:
@@ -115,7 +116,7 @@ class Circuit(Document):
                 magnitude, phase = cmath.polar(numeric)
 
                 sfg.edges[src, dst]['weight'] = {
-                    'symbolic': sympy.latex(symbolic) if isinstance(symbolic, sympy.Expr) else str(symbolic),
+                    'symbolic': expr_to_latex(symbolic) if isinstance(symbolic, sympy.Expr) else str(symbolic),
                     'magnitude': magnitude,
                     'phase': phase*(180/cmath.pi)
                 }
@@ -332,7 +333,7 @@ class Circuit(Document):
         if factor:
             sympy_expression = sympy_expression.factor()
 
-        return sympy.latex(sympy_expression) if latex \
+        return expr_to_latex(sympy_expression) if latex \
             else str(sympy_expression)
 
     def eval_transfer_function(
@@ -479,7 +480,7 @@ class Circuit(Document):
         if factor:
             sympy_expression = sympy_expression.factor()
 
-        return sympy.latex(sympy_expression) if latex else str(sympy_expression)
+        return expr_to_latex(sympy_expression) if latex else str(sympy_expression)
 
     def eval_loop_gain(
             self,
@@ -825,7 +826,7 @@ class Circuit(Document):
             magnitude, phase = cmath.polar(numeric)
 
             sfg.edges[src, dst]['weight'] = {
-                'symbolic': sympy.latex(symbolic) if isinstance(symbolic, sympy.Expr) else str(symbolic),
+                'symbolic': expr_to_latex(symbolic) if isinstance(symbolic, sympy.Expr) else str(symbolic),
                 'magnitude': magnitude,
                 'phase': phase*(180/cmath.pi)
             }
