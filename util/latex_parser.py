@@ -8,6 +8,17 @@ import re
 from sympy.parsing.latex import parse_latex
 from sympy import latex
 
+
+def expr_to_latex(expr) -> str:
+    """LaTeX for SFG / transfer-function UI.
+
+    sympy.latex() treats the PI in R_PI_Q1 as the greek letter pi, which
+    produces R_{\\pi Q1}. Branch edit then rejects that string as invalid
+    LaTeX. Keep PI as the letters PI so it matches R_{O Q1} style names.
+    """
+    s = sympy.latex(expr)
+    return s.replace(r'_{\pi ', r'_{PI ')
+
 def latex_symbol_tokens(latex_str: str) -> list[str]:
     """
     Extract candidate 'symbols' from a LaTeX expression without parsing math.
@@ -62,10 +73,16 @@ def normalize_latex_token(tok: str) -> str:
     base = base.strip()
     sub = sub.strip()
 
-    # remove spaces and LaTeX backslashes inside subscript
-    sub = re.sub(r"\s+", "", sub)
+    # LaTeX commands / greek pi from sympy.latex(R_PI_*)
     sub = sub.replace("\\", "")
-    sub = sub.replace("π", "PI").replace("pi", "PI")
+    sub = sub.replace("π", "PI")
+    sub = re.sub(r'(?i)(?<![A-Za-z])pi(?![A-Za-z])', 'PI', sub)
+
+    # Keep subscript segments: "O Q1" / "PI Q1" -> O_Q1 / PI_Q1
+    # so R_{O Q1} and R_{PI Q1} match parameter names R_O_Q1 / R_PI_Q1.
+    if re.search(r"\s", sub):
+        sub = re.sub(r"\s+", "_", sub.strip())
+        return f"{base}_{sub}"
 
     # Common pattern: single numeric subscript -> concat (C_{2} -> C2, RD_{2} -> RD2, R_{2} -> R2)
     if sub.isdigit():
@@ -91,6 +108,11 @@ def normalize_latex_token(tok: str) -> str:
         m = re.search(r"M(\d+)$", sub)
         if m:
             return f"{base}_PI_M{m.group(1)}"
+
+    # R_{OQ1} / R_{PIQ1} (no space) -> R_O_Q1 / R_PI_Q1
+    glued = re.fullmatch(r"([A-Z]+)([QM]\d+)", sub)
+    if glued:
+        return f"{base}_{glued.group(1)}_{glued.group(2)}"
 
     # Fallback: join with underscore (keeps structure)
     return f"{base}_{sub}"
